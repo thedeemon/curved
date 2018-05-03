@@ -1,0 +1,8 @@
+name "curved"
+description "Look inside curved space"
+authors "Dmitry Popov"
+copyright "Copyright © 2018, Dmitry Popov"
+license "MIT"
+dependency "dlangui" version="~>0.9.177"
+subConfiguration "dlangui" "minimal"
+libs "gdi32" platform="windows"

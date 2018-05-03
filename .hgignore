@@ -1,0 +1,19 @@
+syntax: glob
+*.ncb
+*.plg
+*.bsc
+*.pch
+*.orig
+*.rej
+*.bk
+*.bmp
+*.suo
+*.lib
+*.log
+*.exe
+Debug/*
+Release/*
+.dub/*
+curved
+*.json
+*.txt
