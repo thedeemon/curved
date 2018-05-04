@@ -1,4 +1,4 @@
-import std.stdio, dlangui, dlangui.widgets.metadata, std.math;
+import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv;
 
 mixin APP_ENTRY_POINT;
 
@@ -253,7 +253,7 @@ Dbl4 geodPlane(Dbl4 y) {
     return res;    
 }
 
-void drawFloorDirect(ImageZ img) {
+void drawFloorDirect(ImageZ img, Params ps) {
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2; 
     foreach(sx; -W/2 .. W/2) {
@@ -269,40 +269,47 @@ void drawFloorDirect(ImageZ img) {
     }
 }
 
-void drawFloorRay(ImageZ img) {
+void drawFloorRay(ImageZ img, Params ps) {
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2;
-    const double dt = 0.5; 
+    const double dt = ps.dt;
+    auto f = File("rays.txt", "wt"); 
     foreach(sx; -W/2 .. W/2) {
-        double x = sx, z = screenZ;
+        //double x = sx, z = screenZ;
+
+        double angle = atan(sx / screenZ) + ps.heading*PI/180;
+        double s = sqrt(sx*sx + screenZ*screenZ);
+        double x = sin(angle)*s, z = cos(angle)*s;
+
         int lastsy = 999999; //target sy
         double k = camY / (camY-1);
-        double dx = sx * k - x;
-        double dz = screenZ * k - z;
+        double dx = x * k - x;
+        double dz = z * k - z;
         Dbl4 state;
         state.data[0] = x;
         state.data[1] = dx;
         state.data[2] = z;
         state.data[3] = dz;
-        double s = sqrt(x*x + z*z);
+        //double s = sqrt(x*x + z*z);
         double scrDistAlongRay = s, t = 0;
         
-        // |v0| = sqrt(x*x + z*z)   inside the plane!
+        // |v0| = sqrt(x*x + z*z)    inside the plane!
         // |v(sy)| = k(sy) * |v0|
         const int minsy = 40;
-        while(lastsy >= minsy) {
-            k = scrDistAlongRay / s; // <= 1
-            int sy = cast(int) (k * H/2);
-            if (sy < lastsy) {
+        int sy = H/2;
+        double nextDist = s;
+        while(sy > minsy) {
+            // k = scrDistAlongRay / s; // <= 1
+            // int sy = cast(int) (k * H/2);
+            if (s >= nextDist) {
                 x = state.data[0]; z = state.data[2];
                 int ix = cast(int)x, iz = cast(int)z;
                 int c = ((ix ^ iz) & 255) | 128;
                 uint clr = (c << 16) + (c << 8) + c;
                 img.putPixel(sx + W/2, sy, clr);
-                lastsy = sy;
-                if (sy==minsy) break;
+                sy--;
+                nextDist = scrDistAlongRay * camY / sy;
             }
-
 
             double du = state.data[1] * dt, dv = state.data[3] * dt;
             double ds = sqrt(du*du + dv*dv);
@@ -310,19 +317,35 @@ void drawFloorRay(ImageZ img) {
             t += dt;
             s += ds;
         }
+        f.writefln("sx=%s n=%s", sx, t / dt);
     }// for sx
 }
 
+class Params {
+    double heading, dt;
+}
+
 extern (C) int UIAppMain(string[] args) {
-    Window window = Platform.instance.createWindow("Curved", null, 1, 800, 700);
+    import dlangui.core.logger;
+    int w= 800, h = 700;
+   	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
+
+    version(Windows) {
+        w = w.pixelsToPoints; h = h.pixelsToPoints;
+    }
+    Window window = Platform.instance.createWindow("Curved", null, 1, w, h);
     window.mainWidget = parseML(q{
         VerticalLayout {
-            margins: 10pt
+            backgroundColor: 0xc0c0c0
+            // margins: 10pt
             padding: 10pt
             layoutWidth: 750
             HorizontalLayout {
-                TextWidget { text: "Hello World" }
                 Button {text: "Render"; id: "btnRender"}
+                TextWidget {text: "Heading:" }
+                EditLine { text: "0"; id: "heading"; layoutWidth: 50}
+                TextWidget {text: "dt:" }
+                EditLine { text: "1"; id: "dt"; layoutWidth: 50}
             }
             MotionPicture {id: "pic"}
         }
@@ -333,14 +356,19 @@ extern (C) int UIAppMain(string[] args) {
     v.data[] = [1.0,2,3,4];
     auto v2 = v * 1.1 + v;
     writeln(v2.data);
+    auto edHeading = window.mainWidget.childById!EditLine("heading");
+    auto edDt = window.mainWidget.childById!EditLine("dt");
 
     auto imgZ = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!MotionPicture("pic");
+    auto ps = new Params();
 
     window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
+        ps.heading = edHeading.text.to!double;
+        ps.dt = edDt.text.to!double;
         //drawSphere(imgZ);
-        drawFloorDirect(imgZ);
-        drawFloorRay(imgZ);
+        drawFloorDirect(imgZ, ps);
+        drawFloorRay(imgZ, ps);
         pic.drawImgZ(imgZ);
         return true;
     };
