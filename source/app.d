@@ -1,4 +1,4 @@
-import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv;
+import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array;
 
 mixin APP_ENTRY_POINT;
 
@@ -60,6 +60,15 @@ class MotionPicture : ImageWidget {
         }
         invalidate();
     }
+
+    void drawImgAt(ImageZ img, int dx, int dy, int sx, int sy, int szx, int szy) {
+        assert(dx >= 0 && dy >= 0 && dx + szx <= W && dy + szy <= H);
+        auto w = img.W;
+        foreach(y; 0..szy) {
+            uint* ptr = cdbuf.scanLine(dy + y);
+            ptr[dx .. dx + szx] = img.colors[(sy+y)*w + sx .. (sy+y)*w + sx + szx];
+        }
+    }
 }
 
 mixin(registerWidgets!("__gshared static this", MotionPicture));
@@ -74,6 +83,12 @@ class ImageZ {
         colors.length = W*H;
         depth.length = W*H;
         depth[] = 1000000.0;
+    }
+
+    void copyFrom(ImageZ img) {
+        assert(W==img.W && H==img.H);
+        colors[] = img.colors[];
+        depth[] = img.depth[];
     }
 
     void putPixelZ(int x, int y, uint clr, double z) {
@@ -105,65 +120,70 @@ void drawSphere(ImageZ img) {
     // x = cos(u)*cos(v)
     // z = sin(u)*cos(v)   // swapped y and z
     // y = sin(v)
-    enum NU = 200, NV = 100;
+    enum NU = 1000, NV = 500; // number of mesh points
     const W2 = img.W / 2, H2 = img.H / 2;
-    const double zCenter = 2.0, zScreen = 1.0;
-
+    const double R = Sphere.R;
+    const double zCenter = 3*R, zScreen = img.W / 1.2;
     foreach(iv; 1..NV-1) {
         double v = cast(double)(iv - NV/2) * PI / NV;
         foreach(iu; 0.. NU) {
             double u = cast(double)iu * 2.0*PI / NU;
-
-            double x = cos(u)*cos(v);
-            double z = sin(u)*cos(v);
-            double y = sin(v);
-
+            double x,y,z;
+            Sphere.embedIn3D(u,v, x,y,z);
 
             // project on 'screen' plane
             double z1 = zCenter + z;
             double k = zScreen / z1;
             double px = x * k, py = y * k;
 
-            int ux = cast(int)(u * 100), vx = cast(int)(v * 100) + 1024;
-            uint clr = ux ^ vx;
-            int sx = W2 + cast(int)(px*W2);
-            int sy = H2 - cast(int)(py*W2);
+            //int ux = cast(int)(u * 100), vx = cast(int)(v * 100) + 1024;
+            uint clr = Sphere.color(u, v);
+            int sx = W2 + cast(int)(px);
+            int sy = H2 - cast(int)(py);
             img.putPixelZ(sx, sy, clr, z1);
+            // f.writefln("iu=%s iv=%s x,y,z=%s,%s,%s px,py=%s,%s sx,sy=%s,%s, clr=%s",
+            //             iu, iv,  x,y,z,  px,py,   sx,sy, clr & 255);
+
+            // int c = /*((iu ^ iv) & 127) +*/ ((cast(int) (v/PI*100) + 64)&127);
+            // f.writefln("u=%s v=%s v/PI*100=%s c=%s", u,v, v/PI*100, c);
         }
     }
+}
 
-    auto f = File("out.txt", "wt");
+UV[] makeOneSphereGeodesic() {
     Dbl4 state;
-    state.data = [-1.5, 0.1, 0.0, 0.1]; // here speed = 0.141421;  one step ds = dt * speed
+    state.data = [-1.5, 0.1, 0.0, 0.1]; // one step ds = dt * speed
     double t = 0, dt = 2*PI / 360.0, s = 0.0;
+    auto points = appender!(UV[]);
+
     foreach(i; 0..3600) {
         auto u = state.data[0], v = state.data[2];
-
-        double g11 = cos(v) ^^ 2;
-        double g22 = 1.0;
         double du = state.data[1] * dt, dv = state.data[3] * dt;
-        double ds = sqrt(g11*du*du + g22*dv*dv);
-
-        double x = cos(u)*cos(v);
-        double z = sin(u)*cos(v);
-        double y = sin(v);
-
-
-        // project on 'screen' plane
-        double z1 = zCenter + z;
-        double k = zScreen / z1;
-        double px = x * k, py = y * k;
-
-        int ux = cast(int)(u * 100), vx = cast(int)(v * 100) + 1024;
-        uint clr = (128 - cast(int)(z*100)) << 16;
-        int sx = W2 + cast(int)(px*W2);
-        int sy = H2 - cast(int)(py*W2);
-        img.putPixel(sx, sy, clr);
-
-        if (i % 15 == 0) f.writefln("%s u=%s v=%s s=%s", i, u, v,s);
+        double ds = Sphere.vlen(u,v,du,dv); //sqrt(g11*du*du + g22*dv*dv);
+        points ~= UV(u,v);
         state = evolveRK!geod(state, dt);
         t += dt;
         s += ds;
+        if (s > 6280.0) break;
+    }
+    return points.data;
+}
+
+struct UV { double u,v; }
+
+void drawPoints(S)(ImageZ img, UV[] points) {
+    const W2 = img.W / 2, H2 = img.H / 2;
+    const double zCenter = 3 * Sphere.R, zScreen = img.W / 1.2;
+    foreach(p; points) {
+        double x,y,z;
+        S.embedIn3D(p.u, p.v, x,y,z);
+        double z1 = zCenter + z;
+        double k = zScreen / z1;
+        double px = x * k, py = y * k;
+        uint clr = (128 - cast(int)(z/Sphere.R * 100)) << 16;
+        int sx = W2 + cast(int)(px);
+        int sy = H2 - cast(int)(py);
+        img.putPixel(sx, sy, clr);
     }
 }
 
@@ -239,23 +259,89 @@ Dbl4 geod(Dbl4 y) {
 
     res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
     res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
-    
+
     return res;
 }
 
-Dbl4 geodPlane(Dbl4 y) {
-    //y : u, u', v, v'
-    Dbl4 res;
-    auto du = res.data[0] = y.data[1]; // u' = u'
-    auto dv = res.data[2] = y.data[3]; // v' = v'
-    res.data[1] = 0; // u'' = 0
-    res.data[3] = 0;
-    return res;    
-}
+class FlatPlane {
+    static Dbl4 geodesicStep(Dbl4 y) {
+        //y : u, u', v, v'
+        Dbl4 res;
+        auto du = res.data[0] = y.data[1]; // u' = u'
+        auto dv = res.data[2] = y.data[3]; // v' = v'
+        res.data[1] = 0; // u'' = 0
+        res.data[3] = 0;
+        return res;
+    }
+
+    static uint color(double u, double v) {
+        int iu = cast(int)u, iv = cast(int)v;
+        int c = ((iu ^ iv) & 255) | 128;
+        uint clr = (c << 16) + (c << 8) + c;
+        return clr;
+    }
+
+    static double vlen(double u, double v, double du, double dv) {
+        return sqrt(du*du + dv*dv);
+    }
+
+    static void course(double u0, double v0, double angle, ref double du, ref double dv) {
+        du = sin(angle); dv = cos(angle);
+    }
+}//FlatPlane
+
+class Sphere {
+/*
+g = (cos(v)^^2  0
+     0          1.0)
+    C[0][0][1] = -tan(v);
+    C[1][0][0] = sin(v)*cos(v);
+    C others = 0
+    res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
+    res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
+
+*/
+    static double R = 1000.0;
+    static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
+        x = R*cos(u)*cos(v);
+        z = R*sin(u)*cos(v);
+        y = R*sin(v);// - R*0.8;
+    }
+
+    static Dbl4 geodesicStep(Dbl4 y) {
+        //y : u, u', v, v'
+        Dbl4 res;
+        auto du = res.data[0] = y.data[1]; // u' = u'
+        auto dv = res.data[2] = y.data[3]; // v' = v'
+        double v = y.data[2];
+        double C001 = -tan(v), C100 = sin(v)*cos(v);
+        res.data[1] = -2 * C001*du*dv; //u''
+        res.data[3] = -C100*du*du; //v''
+        return res;
+    }
+
+    static uint color(double u, double v) {
+        int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+        double l = (sin(v) + 1.0)*0.5;
+        int c = cast(int)(((iu ^ iv) & 255)*l);
+        uint clr = /*(c << 16) + (c << 8) +*/ c;
+        if (((iu/10)&1)==1 && (((iv+1000)/10)&1)==1) clr = 0xF08000; //red squares
+        return clr;
+    }
+
+    static double vlen(double u, double v, double du, double dv) {
+        double g11 = cos(v)^^2;
+        return sqrt(g11*du*du + dv*dv)*R;
+    }
+
+    static void course(double u0, double v0, double angle, ref double du, ref double dv) {
+        du = sin(angle)/(cos(v0)*R); dv = cos(angle)/R;
+    }
+}//Sphere
 
 void drawFloorDirect(ImageZ img, Params ps) {
     const int W = img.W, H = img.H;
-    double screenZ = W / 1.2, camY = H/2; 
+    double screenZ = W / 1.2, camY = H/2;
     foreach(sx; -W/2 .. W/2) {
         foreach(sy; 40.. H/2) {
             double k = camY / sy;
@@ -269,51 +355,37 @@ void drawFloorDirect(ImageZ img, Params ps) {
     }
 }
 
-void drawFloorRay(ImageZ img, Params ps) {
+void drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2;
     const double dt = ps.dt;
-    auto f = File("rays.txt", "wt"); 
+    auto f = File("rays.txt", "wt");
+    const double x0 = u0, z0 = v0;
     foreach(sx; -W/2 .. W/2) {
-        //double x = sx, z = screenZ;
-
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
-        double s = sqrt(sx*sx + screenZ*screenZ);
-        double x = sin(angle)*s, z = cos(angle)*s;
+        double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
+        double s = 0, t=0, dx,dz;
+        space.course(x0, z0, angle, dx, dz);
 
-        int lastsy = 999999; //target sy
-        double k = camY / (camY-1);
-        double dx = x * k - x;
-        double dz = z * k - z;
         Dbl4 state;
-        state.data[0] = x;
+        state.data[0] = x0;
         state.data[1] = dx;
-        state.data[2] = z;
+        state.data[2] = z0;
         state.data[3] = dz;
-        //double s = sqrt(x*x + z*z);
-        double scrDistAlongRay = s, t = 0;
-        
-        // |v0| = sqrt(x*x + z*z)    inside the plane!
-        // |v(sy)| = k(sy) * |v0|
-        const int minsy = 40;
+
+        const int minsy = 40;//H/2/8;
         int sy = H/2;
-        double nextDist = s;
+        double nextDist = scrDistAlongRay;
         while(sy > minsy) {
-            // k = scrDistAlongRay / s; // <= 1
-            // int sy = cast(int) (k * H/2);
+            double x = state.data[0], z = state.data[2];
             if (s >= nextDist) {
-                x = state.data[0]; z = state.data[2];
-                int ix = cast(int)x, iz = cast(int)z;
-                int c = ((ix ^ iz) & 255) | 128;
-                uint clr = (c << 16) + (c << 8) + c;
-                img.putPixel(sx + W/2, sy, clr);
+                img.putPixel(sx + W/2, sy, space.color(x, z));
                 sy--;
                 nextDist = scrDistAlongRay * camY / sy;
             }
-
             double du = state.data[1] * dt, dv = state.data[3] * dt;
-            double ds = sqrt(du*du + dv*dv);
-            state = evolveRK!geodPlane(state, dt);
+            double ds = space.vlen(x, z, du, dv);
+            state = evolveRK!(space.geodesicStep)(state, dt);
             t += dt;
             s += ds;
         }
@@ -351,25 +423,31 @@ extern (C) int UIAppMain(string[] args) {
         }
     });
 
-    testRK();
-    Vec!(double, 4) v;
-    v.data[] = [1.0,2,3,4];
-    auto v2 = v * 1.1 + v;
-    writeln(v2.data);
+    // testRK();
+    // Vec!(double, 4) v;
+    // v.data[] = [1.0,2,3,4];
+    // auto v2 = v * 1.1 + v;
+    // writeln(v2.data);
     auto edHeading = window.mainWidget.childById!EditLine("heading");
     auto edDt = window.mainWidget.childById!EditLine("dt");
 
-    auto imgZ = new ImageZ(512,512);
+    auto imgSphere = new ImageZ(512,512);
+    auto img = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!MotionPicture("pic");
     auto ps = new Params();
+    auto plane = new FlatPlane();
 
     window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
-        //drawSphere(imgZ);
-        drawFloorDirect(imgZ, ps);
-        drawFloorRay(imgZ, ps);
-        pic.drawImgZ(imgZ);
+        drawSphere(imgSphere);
+        img.copyFrom(imgSphere);
+        //drawOneSphereGeodesic(img);
+        auto points = makeOneSphereGeodesic();
+        drawPoints!Sphere(img, points);
+        //drawFloorDirect(imgZ, ps);
+        //drawFloorRay(imgZ, ps, plane, 0,0);
+        pic.drawImgAt(img, 0,0, 100,100, 320,320);
         return true;
     };
     // you can access loaded items by id - e.g. to assign signal listeners
