@@ -1,4 +1,4 @@
-import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array;
+import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format;
 
 mixin APP_ENTRY_POINT;
 
@@ -48,11 +48,6 @@ class MotionPicture : ImageWidget {
             uint* ptr = cdbuf.scanLine(dy + y);
             ptr[dx .. dx + szx] = img.colors[(sy+y)*w + sx .. (sy+y)*w + sx + szx];
         }
-    }
-
-    override bool onKeyEvent(KeyEvent e) {
-        writeln("MP.onkeyevent: ", e);
-        return false;
     }
 }
 
@@ -270,7 +265,7 @@ class FlatPlane {
         return sqrt(du*du + dv*dv);
     }
 
-    static void course(double u0, double v0, double angle, ref double du, ref double dv) {
+    static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
         du = sin(angle); dv = cos(angle);
     }
 }//FlatPlane
@@ -299,7 +294,14 @@ g = (cos(v)^^2  0
         auto du = res.data[0] = y.data[1]; // u' = u'
         auto dv = res.data[2] = y.data[3]; // v' = v'
         double v = y.data[2];
-        double C001 = -tan(v), C100 = sin(v)*cos(v);
+        double cosv = cos(v);
+        if (abs(cosv) < 0.0000001) {
+            res.data[1] = du;
+            res.data[3] = dv;
+            return res;
+        }
+        double sinv = sin(v);
+        double C001 = -sinv/cosv, C100 = sinv*cosv;
         res.data[1] = -2 * C001*du*dv; //u''
         res.data[3] = -C100*du*du; //v''
         return res;
@@ -331,8 +333,19 @@ g = (cos(v)^^2  0
         return sqrt(g11*du*du + dv*dv)*R;
     }
 
-    static void course(double u0, double v0, double angle, ref double du, ref double dv) {
-        du = sin(angle)/(cos(v0)*R); dv = cos(angle)/R;
+    static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
+        double cosv0 = cos(v0);
+        if (abs(cosv0) < 0.0000001) cosv0 = 1.0; // nonsensical but at least won't crash
+        du = sin(angle)/(cosv0*R); dv = cos(angle)/R;
+    }
+
+    static double courseAngle(double u0, double v0, double du, double dv) { // in radians
+        // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
+        // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
+        // cos(a) = R*dv / |V|
+        double a = acos(R*dv / vlen(u0, v0, du, dv));
+        if (du < 0) a = 2*PI - a;
+        return a;
     }
 }//Sphere
 
@@ -360,13 +373,13 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     auto f = File("rays.txt", "wt");
     const double x0 = u0, z0 = v0;
     auto paths = appender!(UV[]);
-    const int pixelWidth = 4;
+    const int pixelWidth = 1;
 
     foreach(sx; iota(-W/2, W/2, pixelWidth)) {
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
         double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
         double s = 0, t=0, dx,dz;
-        space.course(x0, z0, angle, dx, dz);
+        space.courseVector(x0, z0, angle, dx, dz);
 
         Dbl4 state;
         state.data[0] = x0;
@@ -375,9 +388,9 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         state.data[3] = dz;
 
         const int minsy = 40;//H/2/8;
-        int sy = H/2;
+        int sy = H/2, iters = 0;
         double nextDist = scrDistAlongRay;
-        while(sy > minsy) {
+        while(sy > minsy && iters < 5000) {
             double x = state.data[0], z = state.data[2];
             if (s >= nextDist) {
                 auto clr = space.color(x, z);
@@ -393,29 +406,35 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
             state = evolveRK!(space.geodesicStep)(state, dt);
             t += dt;
             s += ds;
+            iters++;
         }
         f.writefln("sx=%s n=%s", sx, t / dt);
     }// for sx
     return paths.data;
 }
 
-UV walk(S)(UV pos, double heading, double dt, double dist) {
+UV walk(S)(UV pos, ref double heading, double dt, double dist) {
     double angle = heading*PI/180;
     double s = 0, du,dv;
-    S.course(pos.u, pos.v, angle, du, dv);
+    S.courseVector(pos.u, pos.v, angle, du, dv);
     Dbl4 state;
     state.data[0] = pos.u;
     state.data[1] = du;
     state.data[2] = pos.v;
     state.data[3] = dv;
-    while(s < dist) {
+    int iters = 0;
+    while(s < dist && iters < 1000) {
         double u = state.data[0], v = state.data[2];
         du = state.data[1] * dt; dv = state.data[3] * dt;
         double ds = S.vlen(u, v, du, dv);
         state = evolveRK!(S.geodesicStep)(state, dt);
         s += ds;
+        iters++;
     }
-    return UV(state.data[0], state.data[2]);
+    double u = state.data[0], v = state.data[2];
+    double a = S.courseAngle(u,v, state.data[1], state.data[3]);
+    heading = a*180/PI;
+    return UV(u, v);
 }
 
 class Params {
@@ -444,6 +463,7 @@ extern (C) int UIAppMain(string[] args) {
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
                 TextWidget {text: "dt:" }
                 EditLine { text: "1"; id: "dt"; layoutWidth: 50}
+                TextWidget {text:""; id:"out"}
             }
             MotionPicture {id: "pic"}
         }
@@ -456,6 +476,7 @@ extern (C) int UIAppMain(string[] args) {
     // writeln(v2.data);
     auto edHeading = window.mainWidget.childById!EditLine("heading");
     auto edDt = window.mainWidget.childById!EditLine("dt");
+    auto txtOut = window.mainWidget.childById!TextWidget("out");
 
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
@@ -468,10 +489,9 @@ extern (C) int UIAppMain(string[] args) {
     drawSphere(imgSphere);
 
     void render() {
-        import std.datetime : StopWatch;
-        writeln("render");
-        auto sw = StopWatch();
-        sw.start();
+        import std.datetime.stopwatch : StopWatch, AutoStart;
+        //writeln("render");
+        auto sw = StopWatch(AutoStart.yes);
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
         //drawSphere(imgSphere);
@@ -483,7 +503,7 @@ extern (C) int UIAppMain(string[] args) {
         drawPoints!Sphere(img, points);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 0,320, 0,0, 512,256);
-        writeln("t=", sw.peek().msecs);
+        txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
 
     window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
@@ -492,13 +512,25 @@ extern (C) int UIAppMain(string[] args) {
     };
 
     window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
-        writeln("main keyEvent ", e);
+        //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
             switch(e.keyCode) {
                 case KeyCode.KEY_A: ps.heading -= 10; edHeading.text = ps.heading.to!dstring; break;
                 case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
-                case KeyCode.KEY_W: ps.pos = walk!Sphere(ps.pos, ps.heading, ps.dt, 50); break;
-                case KeyCode.KEY_S: ps.pos = walk!Sphere(ps.pos, ps.heading+180, ps.dt, 50); break;
+                case KeyCode.KEY_W: 
+                    auto hdn = ps.heading;
+                    ps.pos = walk!Sphere(ps.pos, hdn, ps.dt, 50); 
+                    ps.heading = hdn;
+                    edHeading.text = format("%.3g"d, hdn);
+                    break;
+                case KeyCode.KEY_S: 
+                    auto hdn = ps.heading + 180;
+                    ps.pos = walk!Sphere(ps.pos, hdn, ps.dt, 50); 
+                    ps.heading = hdn - 180;
+                    while(ps.heading < 0) ps.heading += 360;
+                    while(ps.heading >= 360) ps.heading -= 360;
+                    edHeading.text = format("%.3g"d, ps.heading);
+                    break;
                 default: return false;
             }
             render();
