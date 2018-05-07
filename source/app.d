@@ -369,13 +369,14 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     import std.range : iota;
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2;
-    const double dt = ps.dt;
     auto f = File("rays.txt", "wt");
     const double x0 = u0, z0 = v0;
     auto paths = appender!(UV[]);
     const int pixelWidth = 1;
+    const bool dyndt = ps.dyndt;
 
     foreach(sx; iota(-W/2, W/2, pixelWidth)) {
+        double dt = ps.dt;
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
         double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
         double s = 0, t=0, dx,dz;
@@ -390,6 +391,8 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         const int minsy = 40;//H/2/8;
         int sy = H/2, iters = 0;
         double nextDist = scrDistAlongRay;
+        bool chat = sx==0;
+        int lastIter = 0;
         while(sy > minsy && iters < 5000) {
             double x = state.data[0], z = state.data[2];
             if (s >= nextDist) {
@@ -398,8 +401,12 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
                     img.putPixel(sx + W/2 + d, sy, clr);
                 sy--;
                 nextDist = scrDistAlongRay * camY / sy;
-
+                if (chat) {
+                    f.writefln("n=%s s=%s nestStep=%s", iters - lastIter, s, nextDist - s);
+                    lastIter = iters;
+                }
                 if ((sx & 63)==0) paths ~= UV(x,z);
+                if (dyndt) dt = sqrt(nextDist - s);
             }
             double du = state.data[1] * dt, dv = state.data[3] * dt;
             double ds = space.vlen(x, z, du, dv);
@@ -408,7 +415,7 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
             s += ds;
             iters++;
         }
-        f.writefln("sx=%s n=%s", sx, t / dt);
+        //f.writefln("sx=%s n=%s", sx, t / dt);
     }// for sx
     return paths.data;
 }
@@ -440,6 +447,7 @@ UV walk(S)(UV pos, ref double heading, double dt, double dist) {
 class Params {
     double heading, dt;
     UV pos;
+    bool dyndt;
 }
 
 extern (C) int UIAppMain(string[] args) {
@@ -463,6 +471,7 @@ extern (C) int UIAppMain(string[] args) {
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
                 TextWidget {text: "dt:" }
                 EditLine { text: "1"; id: "dt"; layoutWidth: 50}
+                CheckBox { text: "Dyn.dt"; id: "dyndt"}
                 TextWidget {text:""; id:"out"}
             }
             MotionPicture {id: "pic"}
@@ -477,6 +486,7 @@ extern (C) int UIAppMain(string[] args) {
     auto edHeading = window.mainWidget.childById!EditLine("heading");
     auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
+    auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
 
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
@@ -494,6 +504,7 @@ extern (C) int UIAppMain(string[] args) {
         auto sw = StopWatch(AutoStart.yes);
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
+        ps.dyndt = cbDDT.checked;
         //drawSphere(imgSphere);
         img.copyFrom(imgSphere);
         //drawOneSphereGeodesic(img);
