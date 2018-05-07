@@ -11,22 +11,10 @@ class MotionPicture : ImageWidget {
 		Ref!DrawBuf r = cdbuf;
 		this.drawable = new ImageDrawable(r);
 		this.margins = 0;// Rect(0, 10, 0, 10);//10
-        fillBytes(0);
+        fillBytes(0x404040);
 	}
 
 	override void measure(int parentWidth, int parentHeight) {
-        /*DrawableRef img = drawable;
-        int w = 0;
-        int h = 0;
-        if (!img.isNull) {
-            w = showW;
-            h = showH;
-			if (fitImage) {
-				auto mgs = margins;
-				auto sz = imgSizeScaled(parentWidth, parentHeight - mgs.top - mgs.bottom);
-				w = sz.x; h = sz.y + mgs.top + mgs.bottom;
-			}
-        }*/
         measuredContent(parentWidth, parentHeight, W, H);
     }
 
@@ -34,21 +22,13 @@ class MotionPicture : ImageWidget {
         if (visibility != Visibility.Visible)
             return;
         super.onDraw(buf);
-        // Rect rc = _pos;
-        // applyMargins(rc);
-		// auto saver = ClipRectSaver(buf, rc, alpha);
-		// applyPadding(rc);
-        // DrawableRef img = drawable;
-        // if (!img.isNull) {
-        //     //img.drawTo(buf, rc, state);
-        // }
     }
 
-	void fillBytes(int q) {
+	void fillBytes(uint q) {
 		foreach(y; 0..cdbuf.height) {
 			uint* ptr = cdbuf.scanLine(y);
 			foreach(x; 0..cdbuf.width)
-				ptr[x] = ((x + q) ^ y) & 255;
+				ptr[x] = q;// ((x + q) ^ y) & 255;
 		}
 	}
 
@@ -68,6 +48,11 @@ class MotionPicture : ImageWidget {
             uint* ptr = cdbuf.scanLine(dy + y);
             ptr[dx .. dx + szx] = img.colors[(sy+y)*w + sx .. (sy+y)*w + sx + szx];
         }
+    }
+
+    override bool onKeyEvent(KeyEvent e) {
+        writeln("MP.onkeyevent: ", e);
+        return false;
     }
 }
 
@@ -159,9 +144,9 @@ UV[] makeOneSphereGeodesic() {
     foreach(i; 0..3600) {
         auto u = state.data[0], v = state.data[2];
         double du = state.data[1] * dt, dv = state.data[3] * dt;
-        double ds = Sphere.vlen(u,v,du,dv); //sqrt(g11*du*du + g22*dv*dv);
+        double ds = Sphere.vlen(u,v,du,dv);
         points ~= UV(u,v);
-        state = evolveRK!geod(state, dt);
+        state = evolveRK!(Sphere.geodesicStep)(state, dt);
         t += dt;
         s += ds;
         if (s > 6280.0) break;
@@ -322,6 +307,18 @@ g = (cos(v)^^2  0
 
     static uint color(double u, double v) {
         int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+        if (iu >= 360) {
+            do iu -= 360; while (iu >= 360);
+        } else if (iu < 0) {
+            do iu += 360; while (iu < 0);
+        }
+
+        if (iv >= 90) {
+            iv = 180 - iv;
+        } else if (iv < -90) {
+            iv = -180 - iv;
+        }
+
         double l = (sin(v) + 1.0)*0.5;
         int c = cast(int)(((iu ^ iv) & 255)*l);
         uint clr = /*(c << 16) + (c << 8) +*/ c;
@@ -355,13 +352,17 @@ void drawFloorDirect(ImageZ img, Params ps) {
     }
 }
 
-void drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
+UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
+    import std.range : iota;
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2;
     const double dt = ps.dt;
     auto f = File("rays.txt", "wt");
     const double x0 = u0, z0 = v0;
-    foreach(sx; -W/2 .. W/2) {
+    auto paths = appender!(UV[]);
+    const int pixelWidth = 4;
+
+    foreach(sx; iota(-W/2, W/2, pixelWidth)) {
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
         double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
         double s = 0, t=0, dx,dz;
@@ -379,9 +380,13 @@ void drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         while(sy > minsy) {
             double x = state.data[0], z = state.data[2];
             if (s >= nextDist) {
-                img.putPixel(sx + W/2, sy, space.color(x, z));
+                auto clr = space.color(x, z);
+                foreach(d; 0..pixelWidth)
+                    img.putPixel(sx + W/2 + d, sy, clr);
                 sy--;
                 nextDist = scrDistAlongRay * camY / sy;
+
+                if ((sx & 63)==0) paths ~= UV(x,z);
             }
             double du = state.data[1] * dt, dv = state.data[3] * dt;
             double ds = space.vlen(x, z, du, dv);
@@ -391,10 +396,31 @@ void drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         }
         f.writefln("sx=%s n=%s", sx, t / dt);
     }// for sx
+    return paths.data;
+}
+
+UV walk(S)(UV pos, double heading, double dt, double dist) {
+    double angle = heading*PI/180;
+    double s = 0, du,dv;
+    S.course(pos.u, pos.v, angle, du, dv);
+    Dbl4 state;
+    state.data[0] = pos.u;
+    state.data[1] = du;
+    state.data[2] = pos.v;
+    state.data[3] = dv;
+    while(s < dist) {
+        double u = state.data[0], v = state.data[2];
+        du = state.data[1] * dt; dv = state.data[3] * dt;
+        double ds = S.vlen(u, v, du, dv);
+        state = evolveRK!(S.geodesicStep)(state, dt);
+        s += ds;
+    }
+    return UV(state.data[0], state.data[2]);
 }
 
 class Params {
     double heading, dt;
+    UV pos;
 }
 
 extern (C) int UIAppMain(string[] args) {
@@ -415,7 +441,7 @@ extern (C) int UIAppMain(string[] args) {
             HorizontalLayout {
                 Button {text: "Render"; id: "btnRender"}
                 TextWidget {text: "Heading:" }
-                EditLine { text: "0"; id: "heading"; layoutWidth: 50}
+                EditLine { text: "90"; id: "heading"; layoutWidth: 50}
                 TextWidget {text: "dt:" }
                 EditLine { text: "1"; id: "dt"; layoutWidth: 50}
             }
@@ -433,41 +459,55 @@ extern (C) int UIAppMain(string[] args) {
 
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
+    auto imgFloor = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!MotionPicture("pic");
     auto ps = new Params();
+    ps.pos.u = 4.7; ps.pos.v = 0;
     auto plane = new FlatPlane();
+    auto sphere = new Sphere();
+    drawSphere(imgSphere);
 
-    window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
+    void render() {
+        import std.datetime : StopWatch;
+        writeln("render");
+        auto sw = StopWatch();
+        sw.start();
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
-        drawSphere(imgSphere);
+        //drawSphere(imgSphere);
         img.copyFrom(imgSphere);
         //drawOneSphereGeodesic(img);
-        auto points = makeOneSphereGeodesic();
-        drawPoints!Sphere(img, points);
+        //auto points = makeOneSphereGeodesic();
         //drawFloorDirect(imgZ, ps);
-        //drawFloorRay(imgZ, ps, plane, 0,0);
+        auto points = drawFloorRay(imgFloor, ps, sphere, ps.pos.u, ps.pos.v);
+        drawPoints!Sphere(img, points);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
+        pic.drawImgAt(imgFloor, 0,320, 0,0, 512,256);
+        writeln("t=", sw.peek().msecs);
+    }
+
+    window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
+        render();
         return true;
     };
-    // you can access loaded items by id - e.g. to assign signal listeners
-    // auto edit1 = window.mainWidget.childById!EditLine("edit1");
-    // auto edit2 = window.mainWidget.childById!EditLine("edit2");
-    // close window on Cancel button click
-    // window.mainWidget.childById!Button("btnCancel").click = delegate(Widget w) {
-    //     window.close();
-    //     return true;
-    // };
-    // show message box with content of editors
-    // window.mainWidget.childById!Button("btnOk").click = delegate(Widget w) {
-    //     window.showMessageBox(UIString.fromRaw("Ok button pressed"d),
-    //                           UIString.fromRaw("Editors content\nEdit1: "d ~ edit1.text ~ "\nEdit2: "d ~ edit2.text));
-    //     return true;
-    // };
 
-    // show window
+    window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
+        writeln("main keyEvent ", e);
+        if (e.action==KeyAction.KeyDown) {
+            switch(e.keyCode) {
+                case KeyCode.KEY_A: ps.heading -= 10; edHeading.text = ps.heading.to!dstring; break;
+                case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
+                case KeyCode.KEY_W: ps.pos = walk!Sphere(ps.pos, ps.heading, ps.dt, 50); break;
+                case KeyCode.KEY_S: ps.pos = walk!Sphere(ps.pos, ps.heading+180, ps.dt, 50); break;
+                default: return false;
+            }
+            render();
+            window.invalidate();
+            return true;
+        }
+        return false;
+    };
+
     window.show();
-
-    // run message loop
     return Platform.instance.enterMessageLoop();
 }
