@@ -2,16 +2,19 @@ import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.arr
 
 mixin APP_ENTRY_POINT;
 
-class MotionPicture : ImageWidget {
+__gshared uint[] wallTexture;
+
+class DrawingBoard : ImageWidget {
 	ColorDrawBuf cdbuf;
-    int W = 700, H = 600; //current size
+    int W = 850, H = 600; //current size
 
 	this() {
 		cdbuf = new ColorDrawBuf(W, H);
 		Ref!DrawBuf r = cdbuf;
 		this.drawable = new ImageDrawable(r);
 		this.margins = 0;// Rect(0, 10, 0, 10);//10
-        fillBytes(0x404040);
+        fillBytes(0xc0c0c0);
+        initWall();
 	}
 
 	override void measure(int parentWidth, int parentHeight) {
@@ -49,9 +52,36 @@ class MotionPicture : ImageWidget {
             ptr[dx .. dx + szx] = img.colors[(sy+y)*w + sx .. (sy+y)*w + sx + szx];
         }
     }
+
+    void initWall() {
+        import std.random : uniform;
+        wallTexture.length = 128*128;
+        foreach(ref x; wallTexture) {
+            int r = uniform(0, 20), g = uniform(0, 20), b = uniform(0, 20);
+            x = 0xB0503F + (r<<16) + (g<<8) + b;
+        }
+        foreach(row; 0..8) {
+            foreach(y; 0..2)
+            foreach(x; 0..128) {
+                int r = uniform(0, 20), g = uniform(0, 20), b = uniform(0, 20);
+                wallTexture[row*16+y+x*128] = 0xCDC5BA  + (r<<16) + (g<<8) + b;
+            }
+            int dx = (row&1)*16;
+            foreach(n; 0..4)
+            foreach(y; 0..16)
+                foreach(x; 0..2) {
+                    int r = uniform(0, 20), g = uniform(0, 20), b = uniform(0, 20);
+                    wallTexture[row*16+y+ (dx + n*32 + x)*128] = 0xCDC5BA  + (r<<16) + (g<<8) + b;
+                }
+        }
+        foreach(y; 0..128) {
+            uint* ptr = cdbuf.scanLine(y);
+            ptr[0..128] = wallTexture[y*128 .. y*128+128];
+        }
+    }
 }
 
-mixin(registerWidgets!("__gshared static this", MotionPicture));
+mixin(registerWidgets!("__gshared static this", DrawingBoard));
 
 class ImageZ {
     int W,H;
@@ -88,10 +118,13 @@ class ImageZ {
         colors[i] = clr;
     }
 
-
     void clear() {
         colors[] = 0;
         depth[] = 1000000.0;
+    }
+
+    void fillRows(int y0, int h, uint clr) {
+        colors[y0*W .. (y0+h)*W] = clr;
     }
 }
 
@@ -100,7 +133,7 @@ void drawSphere(ImageZ img) {
     // x = cos(u)*cos(v)
     // z = sin(u)*cos(v)   // swapped y and z
     // y = sin(v)
-    enum NU = 1000, NV = 500; // number of mesh points
+    enum NU = 1500, NV = 700; // number of mesh points
     const W2 = img.W / 2, H2 = img.H / 2;
     const double R = Sphere.R;
     const double zCenter = 3*R, zScreen = img.W / 1.2;
@@ -243,6 +276,8 @@ Dbl4 geod(Dbl4 y) {
     return res;
 }
 
+enum wallColor = 0xF08000;
+
 class FlatPlane {
     static Dbl4 geodesicStep(Dbl4 y) {
         //y : u, u', v, v'
@@ -320,11 +355,21 @@ g = (cos(v)^^2  0
         } else if (iv < -90) {
             iv = -180 - iv;
         }
+        // iu: 0..360,  iv: -90..90
 
-        double l = (sin(v) + 1.0)*0.5;
-        int c = cast(int)(((iu ^ iv) & 255)*l);
-        uint clr = /*(c << 16) + (c << 8) +*/ c;
-        if (((iu/10)&1)==1 && (((iv+1000)/10)&1)==1) clr = 0xF08000; //red squares
+        // double l = (sin(v) + 1.0)*0.5;
+        int c = ((iu ^ iv) & 31)*4 + 64;
+        uint clr = (c << 16) + (c<<8) + c;
+        int mu = iu % 20, mv = (iv + 180) % 20;
+        if (mu >= 10 && mv >= 10)
+            clr = wallColor; //squares
+        else {
+            if (mv >= 13 && mv < 16 && mu >= 3 && mu < 6)
+                clr = (iu/3 * 2)<<16;
+            else
+            if (mv >= 3 && mv < 6 && mu >= 13 && mu < 16)
+                clr = ((iv + 90)/3 * 4)<<8;
+        }
         return clr;
     }
 
@@ -373,8 +418,8 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     const double x0 = u0, z0 = v0;
     auto paths = appender!(UV[]);
     const int pixelWidth = 1;
-    const bool dyndt = ps.dyndt;
-
+    const bool dyndt = ps.dyndt, walls = ps.walls;
+    img.fillRows(0, H/2-1+30, 0x404080);
     foreach(sx; iota(-W/2, W/2, pixelWidth)) {
         double dt = ps.dt;
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
@@ -388,17 +433,36 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         state.data[2] = z0;
         state.data[3] = dz;
 
-        const int minsy = 40;//H/2/8;
+        const int minsy = 30;//H/2/8;
         int sy = H/2, iters = 0;
         double nextDist = scrDistAlongRay;
         bool chat = sx==0;
         int lastIter = 0;
         while(sy > minsy && iters < 5000) {
             double x = state.data[0], z = state.data[2];
+
+            if (walls) {
+                auto clr = space.color(x, z);
+                if (clr == wallColor) {
+                    int totalh = cast(int) (H * scrDistAlongRay / s);
+                    int h = totalh <= H-2 ? totalh : H-2;
+                    int y0 = H/2-1-h/2;
+                    int tx = cast(int)((x*cos(z) + z)*500) & 127;
+                    double ky = 128.0 / totalh;
+                    double ty0 = h==totalh ? 0 :  (totalh-h)/2 * ky;
+                    foreach(i; 0..h) {
+                        int ty = cast(int) (ky*i + ty0);
+                        clr = wallTexture[tx*128 + ty];
+                        img.putPixel(sx + W/2, y0 + i, clr);
+                    }
+                    break;
+                }
+            }
+
             if (s >= nextDist) {
                 auto clr = space.color(x, z);
                 foreach(d; 0..pixelWidth)
-                    img.putPixel(sx + W/2 + d, sy, clr);
+                    img.putPixel(sx + W/2 + d, sy + H/2-1, clr);
                 sy--;
                 nextDist = scrDistAlongRay * camY / sy;
                 if (chat) {
@@ -447,12 +511,12 @@ UV walk(S)(UV pos, ref double heading, double dt, double dist) {
 class Params {
     double heading, dt;
     UV pos;
-    bool dyndt;
+    bool dyndt, walls;
 }
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
-    int w= 800, h = 700;
+    int w= 880, h = 700;
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
     version(Windows) {
@@ -472,9 +536,10 @@ extern (C) int UIAppMain(string[] args) {
                 TextWidget {text: "dt:" }
                 EditLine { text: "1"; id: "dt"; layoutWidth: 50}
                 CheckBox { text: "Dyn.dt"; id: "dyndt"}
+                CheckBox { text: "Walls"; id: "walls"}
                 TextWidget {text:""; id:"out"}
             }
-            MotionPicture {id: "pic"}
+            DrawingBoard {id: "pic"}
         }
     });
 
@@ -487,11 +552,12 @@ extern (C) int UIAppMain(string[] args) {
     auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
     auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
+    auto cbWalls = window.mainWidget.childById!CheckBox("walls");
 
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
     auto imgFloor = new ImageZ(512,512);
-    auto pic = window.mainWidget.childById!MotionPicture("pic");
+    auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0;
     auto plane = new FlatPlane();
@@ -505,6 +571,7 @@ extern (C) int UIAppMain(string[] args) {
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
         ps.dyndt = cbDDT.checked;
+        ps.walls = cbWalls.checked;
         //drawSphere(imgSphere);
         img.copyFrom(imgSphere);
         //drawOneSphereGeodesic(img);
@@ -513,7 +580,7 @@ extern (C) int UIAppMain(string[] args) {
         auto points = drawFloorRay(imgFloor, ps, sphere, ps.pos.u, ps.pos.v);
         drawPoints!Sphere(img, points);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
-        pic.drawImgAt(imgFloor, 0,320, 0,0, 512,256);
+        pic.drawImgAt(imgFloor, 320,0, 0,0, 512,512);
         txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
 
