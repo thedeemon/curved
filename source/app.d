@@ -157,25 +157,6 @@ void drawSphere(ImageZ img) {
     }
 }
 
-UV[] makeOneSphereGeodesic() {
-    Dbl4 state;
-    state.data = [-1.5, 0.1, 0.0, 0.1]; // one step ds = dt * speed
-    double t = 0, dt = 2*PI / 360.0, s = 0.0;
-    auto points = appender!(UV[]);
-
-    foreach(i; 0..3600) {
-        auto u = state.data[0], v = state.data[2];
-        double du = state.data[1] * dt, dv = state.data[3] * dt;
-        double ds = Sphere.vlen(u,v,du,dv);
-        points ~= UV(u,v);
-        state = evolveRK!(Sphere.geodesicStep)(state, dt);
-        t += dt;
-        s += ds;
-        if (s > 6280.0) break;
-    }
-    return points.data;
-}
-
 struct UV { double u,v; }
 
 void drawPoints(S)(ImageZ img, UV[] points) {
@@ -220,31 +201,6 @@ struct Vec(T, int N) {
 }
 
 alias Dbl4 = Vec!(double, 4);
-
-// Dbl4 geod(Dbl4 y) {
-//     //y : u, u', v, v'
-//     Dbl4 res;
-//     auto du = res.data[0] = y.data[1]; // u' = u'
-//     auto dv = res.data[2] = y.data[3]; // v' = v'
-//     static double[2][2][2] C;
-//     //   [[(0, -tan(v)), (0,0)],[(sin(v)*cos(v),0),(0, 0)]])
-//     //    C = C.subs({u:y0,v:y2})
-//     double v = y.data[2];
-//     C[0][0][0] = 0; // sphere
-//     C[0][0][1] = -tan(v);
-//     C[0][1][0] = 0;
-//     C[0][1][1] = 0;
-//     C[1][0][0] = sin(v)*cos(v);
-//     C[1][0][1] = 0;
-//     C[1][1][0] = 0;
-//     C[1][1][1] = 0;
-
-//     res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
-//     res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
-
-//     return res;
-// }
-
 enum wallColor = 0xF08000;
 
 string[] genCode(alias surfaceEquation)() {
