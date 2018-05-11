@@ -129,16 +129,12 @@ class ImageZ {
 }
 
 void drawSurface(S)(ImageZ img) {
-    // R = 1   u - longitude,  v - latitude
-    // x = cos(u)*cos(v)
-    // z = sin(u)*cos(v)   // swapped y and z
-    // y = sin(v)
     enum NU = 1500, NV = 700; // number of mesh points
     const W2 = img.W / 2, H2 = img.H / 2;
     const double R = S.R;
-    const double zCenter = 3*R, zScreen = img.W / 1.2;
+    const double zCenter = 9*R, zScreen = img.W / 1.2;
     foreach(iv; 1..NV-1) {
-        double v = cast(double)(iv - NV/2) * PI / NV;
+        double v = cast(double)(iv - NV/2) * 2* PI / NV;
         foreach(iu; 0.. NU) {
             double u = cast(double)iu * 2.0*PI / NU;
             double x,y,z;
@@ -161,7 +157,7 @@ struct UV { double u,v; }
 
 void drawPoints(S)(ImageZ img, UV[] points) {
     const W2 = img.W / 2, H2 = img.H / 2;
-    const double zCenter = 3 * S.R, zScreen = img.W / 1.2;
+    const double zCenter = 9 * S.R, zScreen = img.W / 1.2;
     foreach(p; points) {
         double x,y,z;
         S.embedIn3D(p.u, p.v, x,y,z);
@@ -265,7 +261,7 @@ class Surface(alias surfaceEquation) {
         Dbl4 res;
         auto du = res.data[0] = y.data[1]; // u' = u'
         auto dv = res.data[2] = y.data[3]; // v' = v'
-        double v = y.data[2];
+        const double v = y.data[2], u = y.data[0];
         const double cos_v = cos(v);
         if (abs(cos_v) < 0.0000001) { // handle poles, poorly
             res.data[1] = du;
@@ -273,6 +269,7 @@ class Surface(alias surfaceEquation) {
             return res;
         }
         const double sin_v = sin(v);
+        const double sin_u = sin(u), cos_u = cos(u);
         pragma(msg, codes[1]);
         pragma(msg, codes[2]);
         mixin(codes[1]);
@@ -314,11 +311,13 @@ class Surface(alias surfaceEquation) {
     static double vlen(double u, double v, double du, double dv) {
         pragma(msg, codes[3]);
         const double cos_v = cos(v), sin_v = sin(v);
+        const double cos_u = cos(u), sin_u = sin(u);
         mixin(codes[3]);
     }
 
     static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
         double cos_v = cos(v0), sin_v = sin(v0);
+        double cos_u = cos(u0), sin_u = sin(u0);
         if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
         enum u_code = format("du = sin(angle) / sqrt(%s);", codes[4]).txtSimp;
         enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[6]).txtSimp;
@@ -334,6 +333,7 @@ class Surface(alias surfaceEquation) {
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
         const double cos_v = cos(v0), sin_v = sin(v0);
+        const double sin_u = sin(u0), cos_u = cos(u0);
         enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[6]).txtSimp;
         enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[5], codes[6]).txtSimp;
         pragma(msg, up_v_code);
@@ -347,16 +347,17 @@ class Surface(alias surfaceEquation) {
     }
 }// Surface
 
+alias Sphere = Surface!sphereEq;
+alias FlatPlane = Surface!planeEq;
+alias Ellipsoid = Surface!ellipsoidEq;
+alias Thingy = Surface!thingyEq;
+
 Expr[] sphereEq() {
     auto R = new Var("R");
     return [mul(R, mul(new Cos("u"), new Cos("v"))),
             mul(R, new Sin("v")),
             mul(R, mul(new Sin("u"), new Cos("v")))  ];
 }
-
-alias Sphere = Surface!sphereEq;
-alias FlatPlane = Surface!planeEq;
-alias Ellipsoid = Surface!ellipsoidEq;
 
 Expr[] planeEq() {
     auto R = new Var("R");
@@ -368,6 +369,20 @@ Expr[] ellipsoidEq() {
     return [mul(R, mul(new Cos("u"), new Cos("v"))),
             mul(div(R, new Const("2")), new Sin("v")),
             mul(R, mul(new Sin("u"), new Cos("v")))  ];
+}
+
+Expr[] thingyEq() {
+    auto R = new Var("R"), two = new Const("2");
+    /*
+    X = 2+cos(v)
+    z = sin(v)
+    x = X*cos(u) = (2+cos(v))*cos(u)
+    y = X*sin(u) = (2+cos(v))*sin(u)
+    */
+
+    return [mul(R, add(two, new Cos("v")), new Cos("u")),
+            mul(R, add(two, new Cos("v")), new Sin("u")),
+            mul(R, new Sin("v")) ];
 }
 
 UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
@@ -512,9 +527,9 @@ extern (C) int UIAppMain(string[] args) {
     auto imgFloor = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
-    ps.pos.u = 4.7; ps.pos.v = 0;
+    ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
-    alias Geom = Ellipsoid;
+    alias Geom = Thingy;
 
     auto geom = new Geom();
     drawSurface!Geom(imgSphere);
