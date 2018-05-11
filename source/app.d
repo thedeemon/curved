@@ -128,28 +128,28 @@ class ImageZ {
     }
 }
 
-void drawSphere(ImageZ img) {
+void drawSurface(S)(ImageZ img) {
     // R = 1   u - longitude,  v - latitude
     // x = cos(u)*cos(v)
     // z = sin(u)*cos(v)   // swapped y and z
     // y = sin(v)
     enum NU = 1500, NV = 700; // number of mesh points
     const W2 = img.W / 2, H2 = img.H / 2;
-    const double R = Sphere.R;
+    const double R = S.R;
     const double zCenter = 3*R, zScreen = img.W / 1.2;
     foreach(iv; 1..NV-1) {
         double v = cast(double)(iv - NV/2) * PI / NV;
         foreach(iu; 0.. NU) {
             double u = cast(double)iu * 2.0*PI / NU;
             double x,y,z;
-            Sphere.embedIn3D(u,v, x,y,z);
+            S.embedIn3D(u,v, x,y,z);
 
             // project on 'screen' plane
             double z1 = zCenter + z;
             double k = zScreen / z1;
             double px = x * k, py = y * k;
 
-            uint clr = Sphere.color(u, v);
+            uint clr = S.color(u, v);
             int sx = W2 + cast(int)(px);
             int sy = H2 - cast(int)(py);
             img.putPixelZ(sx, sy, clr, z1);
@@ -161,14 +161,14 @@ struct UV { double u,v; }
 
 void drawPoints(S)(ImageZ img, UV[] points) {
     const W2 = img.W / 2, H2 = img.H / 2;
-    const double zCenter = 3 * Sphere.R, zScreen = img.W / 1.2;
+    const double zCenter = 3 * S.R, zScreen = img.W / 1.2;
     foreach(p; points) {
         double x,y,z;
         S.embedIn3D(p.u, p.v, x,y,z);
         double z1 = zCenter + z;
         double k = zScreen / z1;
         double px = x * k, py = y * k;
-        uint clr = (128 - cast(int)(z/Sphere.R * 100)) << 16;
+        uint clr = (128 - cast(int)(z/S.R * 100)) << 16;
         int sx = W2 + cast(int)(px);
         int sy = H2 - cast(int)(py);
         img.putPixel(sx, sy, clr);
@@ -250,7 +250,7 @@ string[] genCode(alias surfaceEquation)() {
 
 class Surface(alias surfaceEquation) {
     enum codes = genCode!surfaceEquation();
-    static double R = 1000.0;
+    __gshared static double R = 1000.0;
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
         pragma(msg, codes[0]);
         const double cos_v = cos(v);
@@ -313,12 +313,12 @@ class Surface(alias surfaceEquation) {
 
     static double vlen(double u, double v, double du, double dv) {
         pragma(msg, codes[3]);
-        const double cos_v = cos(v);
+        const double cos_v = cos(v), sin_v = sin(v);
         mixin(codes[3]);
     }
 
     static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
-        double cos_v = cos(v0);
+        double cos_v = cos(v0), sin_v = sin(v0);
         if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
         enum u_code = format("du = sin(angle) / sqrt(%s);", codes[4]).txtSimp;
         enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[6]).txtSimp;
@@ -333,6 +333,7 @@ class Surface(alias surfaceEquation) {
         // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
+        const double cos_v = cos(v0), sin_v = sin(v0);
         enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[6]).txtSimp;
         enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[5], codes[6]).txtSimp;
         pragma(msg, up_v_code);
@@ -355,10 +356,18 @@ Expr[] sphereEq() {
 
 alias Sphere = Surface!sphereEq;
 alias FlatPlane = Surface!planeEq;
+alias Ellipsoid = Surface!ellipsoidEq;
 
 Expr[] planeEq() {
     auto R = new Var("R");
     return [mul(new Var("u"), R), zero, mul(new Var("v"),R)];
+}
+
+Expr[] ellipsoidEq() {
+    auto R = new Var("R");
+    return [mul(R, mul(new Cos("u"), new Cos("v"))),
+            mul(div(R, new Const("2")), new Sin("v")),
+            mul(R, mul(new Sin("u"), new Cos("v")))  ];
 }
 
 UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
@@ -369,7 +378,9 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     auto paths = appender!(UV[]);
     const int pixelWidth = 1;
     const bool dyndt = ps.dyndt, walls = ps.walls;
-    img.fillRows(0, H/2-1+30, 0x404080);
+    const int minsy = cast(int)(H/2 / ps.range);//H/2/8;
+    img.fillRows(0, H/2+minsy, 0x505090);
+
     foreach(sx; iota(-W/2, W/2, pixelWidth)) {
         double dt = ps.dt;
         double angle = atan(sx / screenZ) + ps.heading*PI/180;
@@ -383,7 +394,6 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         state.data[2] = z0;
         state.data[3] = dz;
 
-        const int minsy = 30;//H/2/8;
         int sy = H/2, iters = 0;
         double nextDist = scrDistAlongRay;
         while(sy > minsy && iters < 5000) {
@@ -452,7 +462,7 @@ UV walk(S)(UV pos, ref double heading, double dt, double dist) {
 }
 
 class Params {
-    double heading, dt;
+    double heading, dt, range;
     UV pos;
     bool dyndt, walls;
 }
@@ -480,6 +490,10 @@ extern (C) int UIAppMain(string[] args) {
                 EditLine { text: "1"; id: "dt"; layoutWidth: 50}
                 CheckBox { text: "Dyn.dt"; id: "dyndt"}
                 CheckBox { text: "Walls"; id: "walls"}
+                TextWidget {text: "Range:" }
+                EditLine { text: "6"; id: "range"; layoutWidth: 70}
+                TextWidget {text: "R:" }
+                EditLine { text: "1000"; id: "R"; layoutWidth: 70}                
                 TextWidget {text:""; id:"out"}
             }
             DrawingBoard {id: "pic"}
@@ -491,18 +505,19 @@ extern (C) int UIAppMain(string[] args) {
     auto txtOut = window.mainWidget.childById!TextWidget("out");
     auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
     auto cbWalls = window.mainWidget.childById!CheckBox("walls");
-
+    auto edRange = window.mainWidget.childById!EditLine("range");
+    auto edR = window.mainWidget.childById!EditLine("R");
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
     auto imgFloor = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0;
-
-    alias Geom = Sphere;
+    ps.range = 6.0;
+    alias Geom = Ellipsoid;
 
     auto geom = new Geom();
-    drawSphere(imgSphere);
+    drawSurface!Geom(imgSphere);
 
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
@@ -511,6 +526,11 @@ extern (C) int UIAppMain(string[] args) {
         ps.dt = edDt.text.to!double;
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
+        auto rng = edRange.text.to!double;
+        if (rng >= 1 && rng < 10) ps.range = rng;
+        auto r = edR.text.to!double;
+        if (r >= 100 && r <= 1000000) Geom.R = r; 
+        // ps.R = 
         img.copyFrom(imgSphere);
         //drawOneSphereGeodesic(img);
         //auto points = makeOneSphereGeodesic();

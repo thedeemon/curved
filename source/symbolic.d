@@ -81,6 +81,14 @@ class Mul : Expr {
         auto nonTriv = abc.filter!(e => !e.eq(1)).array;
         if (nonTriv.length >= 2 && nonTriv[0].eq(-1) && nonTriv[1].eq(-1))
             nonTriv = nonTriv[2..$];
+        while(nonTriv.length > 1) {
+            Const c0 = cast(Const)nonTriv[0], c1 = cast(Const)nonTriv[1];
+            if (c0 && c1) {
+                auto c = c0.v.to!int * c1.v.to!int;
+                Expr e = new Const(c.to!string);
+                nonTriv = [e] ~ nonTriv[2..$];
+            } else break;
+        }
         Expr[] nums, denums, nonDivs;
         foreach(e; nonTriv) {
             if (Div d = cast(Div)e) {
