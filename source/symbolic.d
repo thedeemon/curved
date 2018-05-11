@@ -348,16 +348,8 @@ Expr divSimp(Expr a, Expr b) {
     return new Div(a, b);
 }
 
-Expr[] diff(Expr[] vec, string dx) {
-    return vec.amap!(e => e.diff(dx));
-}
-
-Expr dot(Expr[] a, Expr[] b) {
-    Expr[] ab = iota(a.length).amap!(i => mul(a[i], b[i]));
-    // foreach(i; 0..a.length)
-    //     ab ~= mul(a[i], b[i]);
-    return new Add(ab).simp;
-}
+Expr[] diff(Expr[] vec, string dx) { return vec.amap!(e => e.diff(dx)); }
+Expr dot(Expr[] a, Expr[] b) { return iota(a.length).amap!(i => mul(a[i], b[i])).add; }
 
 string txtSimp(string s) {
     return s.replace("sqrt(R * R)","R").replace("sqrt(1)", "1");
