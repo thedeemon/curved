@@ -1,5 +1,5 @@
 import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format;
-
+import symbolic;
 mixin APP_ENTRY_POINT;
 
 __gshared uint[] wallTexture;
@@ -149,16 +149,10 @@ void drawSphere(ImageZ img) {
             double k = zScreen / z1;
             double px = x * k, py = y * k;
 
-            //int ux = cast(int)(u * 100), vx = cast(int)(v * 100) + 1024;
             uint clr = Sphere.color(u, v);
             int sx = W2 + cast(int)(px);
             int sy = H2 - cast(int)(py);
             img.putPixelZ(sx, sy, clr, z1);
-            // f.writefln("iu=%s iv=%s x,y,z=%s,%s,%s px,py=%s,%s sx,sy=%s,%s, clr=%s",
-            //             iu, iv,  x,y,z,  px,py,   sx,sy, clr & 255);
-
-            // int c = /*((iu ^ iv) & 127) +*/ ((cast(int) (v/PI*100) + 64)&127);
-            // f.writefln("u=%s v=%s v/PI*100=%s c=%s", u,v, v/PI*100, c);
         }
     }
 }
@@ -200,15 +194,6 @@ void drawPoints(S)(ImageZ img, UV[] points) {
     }
 }
 
-// time-dependent:  f'(t,y) = drv(t,y)
-T evolveRKt(alias drv, T)(double t, T state, double dt) {
-    auto a = drv(t, state);
-    auto b = drv(t + dt/2,  state + a * (dt/2));
-    auto c = drv(t + dt/2,  state + b * (dt/2));
-    auto d = drv(t + dt, state + c*dt);
-    return state + a*(dt/6) + b*(dt/3) + c*(dt/3) + d*(dt/6);
-}
-
 // f'(t,y) = drv(y)
 T evolveRK(alias drv, T)(T state, double dt) {
     auto a = drv(state);
@@ -216,22 +201,6 @@ T evolveRK(alias drv, T)(T state, double dt) {
     auto c = drv(state + b * (dt/2));
     auto d = drv(state + c*dt);
     return state + a*(dt/6) + b*(dt/3) + c*(dt/3) + d*(dt/6);
-}
-
-double dsqrt(double x, double y) {
-    return 1.0/(2*sqrt(x));
-}
-
-void testRK() {
-    double s = 1.0;
-    double dt = 1.0/128, t = 1.0;
-    foreach(n; 0..3*128+1) {
-        if (n % 128 == 0) {
-            writefln("x=%s y=%s", t, s);
-        }
-        s = evolveRKt!dsqrt(t, s, dt);
-        t += dt;
-    }
 }
 
 struct Vec(T, int N) {
@@ -252,75 +221,87 @@ struct Vec(T, int N) {
 
 alias Dbl4 = Vec!(double, 4);
 
-Dbl4 geod(Dbl4 y) {
-    //y : u, u', v, v'
-    Dbl4 res;
-    auto du = res.data[0] = y.data[1]; // u' = u'
-    auto dv = res.data[2] = y.data[3]; // v' = v'
-    static double[2][2][2] C;
-    //   [[(0, -tan(v)), (0,0)],[(sin(v)*cos(v),0),(0, 0)]])
-    //    C = C.subs({u:y0,v:y2})
-    double v = y.data[2];
-    C[0][0][0] = 0; // sphere
-    C[0][0][1] = -tan(v);
-    C[0][1][0] = 0;
-    C[0][1][1] = 0;
-    C[1][0][0] = sin(v)*cos(v);
-    C[1][0][1] = 0;
-    C[1][1][0] = 0;
-    C[1][1][1] = 0;
+// Dbl4 geod(Dbl4 y) {
+//     //y : u, u', v, v'
+//     Dbl4 res;
+//     auto du = res.data[0] = y.data[1]; // u' = u'
+//     auto dv = res.data[2] = y.data[3]; // v' = v'
+//     static double[2][2][2] C;
+//     //   [[(0, -tan(v)), (0,0)],[(sin(v)*cos(v),0),(0, 0)]])
+//     //    C = C.subs({u:y0,v:y2})
+//     double v = y.data[2];
+//     C[0][0][0] = 0; // sphere
+//     C[0][0][1] = -tan(v);
+//     C[0][1][0] = 0;
+//     C[0][1][1] = 0;
+//     C[1][0][0] = sin(v)*cos(v);
+//     C[1][0][1] = 0;
+//     C[1][1][0] = 0;
+//     C[1][1][1] = 0;
 
-    res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
-    res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
+//     res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
+//     res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
 
-    return res;
-}
+//     return res;
+// }
 
 enum wallColor = 0xF08000;
 
-class FlatPlane {
-    static Dbl4 geodesicStep(Dbl4 y) {
-        //y : u, u', v, v'
-        Dbl4 res;
-        auto du = res.data[0] = y.data[1]; // u' = u'
-        auto dv = res.data[2] = y.data[3]; // v' = v'
-        res.data[1] = 0; // u'' = 0
-        res.data[3] = 0;
-        return res;
-    }
+string[] genCode(alias surfaceEquation)() {
+    Expr[] X = surfaceEquation();
+    string embed = format("x = %s; y = %s; z = %s;", X[0].code, X[1].code, X[2].code);
 
-    static uint color(double u, double v) {
-        int iu = cast(int)u, iv = cast(int)v;
-        int c = ((iu ^ iv) & 255) | 128;
-        uint clr = (c << 16) + (c << 8) + c;
-        return clr;
-    }
+    auto Xu = X.diff("u"); // basis vectors
+    auto Xv = X.diff("v");
+    Expr[2][2] g, ginv; // metric tensor and its inverse
+    g[0][0] = dot(Xu, Xu);
+    g[0][1] = g[1][0] = dot(Xu, Xv);
+    g[1][1] = dot(Xv, Xv);
+    auto det_g = add(mul(g[0][0], g[1][1]), neg(mul(g[0][1], g[1][0])));
+    ginv[0][0] = div(g[1][1], det_g);
+    ginv[0][1] = ginv[1][0] = div(neg(g[0][1]), det_g);
+    ginv[1][1] = div(g[0][0], det_g);
+    
+    Expr[2][2][2] C; // Christoffel symbols 
+    string[] dx = ["u","v"];
+    auto two = new Const("2");
+    foreach(k; 0..2)
+        foreach(i; 0..2)
+            foreach(j; 0..2) {
+                //Ckij = 1/2 * ginv_kl * (d/dx_j g_li  + d/dx_i g_lj - d/dx_l g_ij )
+                Expr[2] tmp;
+                foreach(l; 0..2) {
+                    auto J = g[l][i].diff(dx[j]);
+                    auto I = g[l][j].diff(dx[i]);
+                    auto L = neg(g[i][j].diff(dx[l]));
+                    tmp[l] = div( mul(ginv[k][l], new Add([J, I, L]).simp), two);
+                }
+                C[k][i][j] = add(tmp[0], tmp[1]);
+            }
+    // res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
+    // res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
+    string u_accel = format("res.data[1] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n", 
+                            C[0][0][0].code, C[0][0][1].code, C[0][1][1].code).txtSimp; 
+    string v_accel = format("res.data[3] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n", 
+                            C[1][0][0].code, C[1][0][1].code, C[1][1][1].code).txtSimp; 
 
-    static double vlen(double u, double v, double du, double dv) {
-        return sqrt(du*du + dv*dv);
-    }
+    Expr du = new Var("du"), dv = new Var("dv");
+    Expr mag = add(mul(g[0][0], du, du), mul(two, g[0][1], du, dv), mul(g[1][1], dv,dv));
+    string vlen = format("return sqrt(%s);", mag.code).txtSimp;                            
+    return [embed, u_accel, v_accel, vlen, g[0][0].code, g[0][1].code, g[1][1].code];
+    //      0      1        2         3      4            5              6
+}
 
-    static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
-        du = sin(angle); dv = cos(angle);
-    }
-}//FlatPlane
-
-class Sphere {
-/*
-g = (cos(v)^^2  0
-     0          1.0)
-    C[0][0][1] = -tan(v);
-    C[1][0][0] = sin(v)*cos(v);
-    C others = 0
-    res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
-    res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
-
-*/
+class Surface(alias surfaceEquation) {
+    enum codes = genCode!surfaceEquation();
     static double R = 1000.0;
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
-        x = R*cos(u)*cos(v);
-        z = R*sin(u)*cos(v);
-        y = R*sin(v);// - R*0.8;
+        pragma(msg, codes[0]);
+        const double cos_v = cos(v);
+        const double sin_v = sin(v);
+        const double cos_u = cos(u);
+        const double sin_u = sin(u);
+        mixin(codes[0]);
     }
 
     static Dbl4 geodesicStep(Dbl4 y) {
@@ -329,16 +310,17 @@ g = (cos(v)^^2  0
         auto du = res.data[0] = y.data[1]; // u' = u'
         auto dv = res.data[2] = y.data[3]; // v' = v'
         double v = y.data[2];
-        double cosv = cos(v);
-        if (abs(cosv) < 0.0000001) {
+        const double cos_v = cos(v);
+        if (abs(cos_v) < 0.0000001) { // handle poles, poorly
             res.data[1] = du;
             res.data[3] = dv;
             return res;
         }
-        double sinv = sin(v);
-        double C001 = -sinv/cosv, C100 = sinv*cosv;
-        res.data[1] = -2 * C001*du*dv; //u''
-        res.data[3] = -C100*du*du; //v''
+        const double sin_v = sin(v);
+        pragma(msg, codes[1]);
+        pragma(msg, codes[2]);
+        mixin(codes[1]);
+        mixin(codes[2]);
         return res;
     }
 
@@ -361,7 +343,7 @@ g = (cos(v)^^2  0
         int c = ((iu ^ iv) & 31)*4 + 64;
         uint clr = (c << 16) + (c<<8) + c;
         int mu = iu % 20, mv = (iv + 180) % 20;
-        if (mu >= 10 && mv >= 10)
+        if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
             clr = wallColor; //squares
         else {
             if (mv >= 13 && mv < 16 && mu >= 3 && mu < 6)
@@ -374,47 +356,59 @@ g = (cos(v)^^2  0
     }
 
     static double vlen(double u, double v, double du, double dv) {
-        double g11 = cos(v)^^2;
-        return sqrt(g11*du*du + dv*dv)*R;
+        pragma(msg, codes[3]);
+        const double cos_v = cos(v);
+        mixin(codes[3]);
     }
 
     static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
-        double cosv0 = cos(v0);
-        if (abs(cosv0) < 0.0000001) cosv0 = 1.0; // nonsensical but at least won't crash
-        du = sin(angle)/(cosv0*R); dv = cos(angle)/R;
+        double cos_v = cos(v0);
+        if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
+        enum u_code = format("du = sin(angle) / sqrt(%s);", codes[4]).txtSimp;
+        enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[6]).txtSimp;
+        pragma(msg, u_code);
+        pragma(msg, v_code);
+        mixin(u_code);
+        mixin(v_code);
+        //du = sin(angle)/(cos_v*R); dv = cos(angle)/R;
     }
 
     static double courseAngle(double u0, double v0, double du, double dv) { // in radians
         // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
-        double a = acos(R*dv / vlen(u0, v0, du, dv));
+        enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[6]).txtSimp;
+        enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[5], codes[6]).txtSimp;
+        pragma(msg, up_v_code);
+        pragma(msg, product_code);
+        mixin(up_v_code);
+        mixin(product_code);
+        double a = acos(product / vlen(u0, v0, du, dv));
+        //double a = acos(R*dv / vlen(u0, v0, du, dv));
         if (du < 0) a = 2*PI - a;
         return a;
     }
-}//Sphere
+}// Surface
 
-void drawFloorDirect(ImageZ img, Params ps) {
-    const int W = img.W, H = img.H;
-    double screenZ = W / 1.2, camY = H/2;
-    foreach(sx; -W/2 .. W/2) {
-        foreach(sy; 40.. H/2) {
-            double k = camY / sy;
-            double x = sx * k;
-            double z = screenZ * k;
-            int ix = cast(int)x, iz = cast(int)z;
-            int c = ((ix ^ iz) & 255) | 128;
-            uint clr = (c << 16) + (c << 8) + c;
-            img.putPixel(sx + W/2, sy + H/2, clr);
-        }
-    }
+Expr[] sphereEq() {
+    auto R = new Var("R");
+    return [mul(R, mul(new Cos("u"), new Cos("v"))),
+            mul(R, new Sin("v")),
+            mul(R, mul(new Sin("u"), new Cos("v")))  ];
+}
+
+alias Sphere = Surface!sphereEq;
+alias FlatPlane = Surface!planeEq;
+
+Expr[] planeEq() {
+    auto R = new Var("R");
+    return [mul(new Var("u"), R), zero, mul(new Var("v"),R)];
 }
 
 UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
     import std.range : iota;
     const int W = img.W, H = img.H;
     double screenZ = W / 1.2, camY = H/2;
-    auto f = File("rays.txt", "wt");
     const double x0 = u0, z0 = v0;
     auto paths = appender!(UV[]);
     const int pixelWidth = 1;
@@ -436,8 +430,6 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
         const int minsy = 30;//H/2/8;
         int sy = H/2, iters = 0;
         double nextDist = scrDistAlongRay;
-        bool chat = sx==0;
-        int lastIter = 0;
         while(sy > minsy && iters < 5000) {
             double x = state.data[0], z = state.data[2];
 
@@ -465,10 +457,6 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
                     img.putPixel(sx + W/2 + d, sy + H/2-1, clr);
                 sy--;
                 nextDist = scrDistAlongRay * camY / sy;
-                if (chat) {
-                    f.writefln("n=%s s=%s nestStep=%s", iters - lastIter, s, nextDist - s);
-                    lastIter = iters;
-                }
                 if ((sx & 63)==0) paths ~= UV(x,z);
                 if (dyndt) dt = sqrt(nextDist - s);
             }
@@ -479,7 +467,6 @@ UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
             s += ds;
             iters++;
         }
-        //f.writefln("sx=%s n=%s", sx, t / dt);
     }// for sx
     return paths.data;
 }
@@ -543,11 +530,6 @@ extern (C) int UIAppMain(string[] args) {
         }
     });
 
-    // testRK();
-    // Vec!(double, 4) v;
-    // v.data[] = [1.0,2,3,4];
-    // auto v2 = v * 1.1 + v;
-    // writeln(v2.data);
     auto edHeading = window.mainWidget.childById!EditLine("heading");
     auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
@@ -560,25 +542,25 @@ extern (C) int UIAppMain(string[] args) {
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0;
-    auto plane = new FlatPlane();
-    auto sphere = new Sphere();
+
+    alias Geom = Sphere;
+
+    auto geom = new Geom();
     drawSphere(imgSphere);
 
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
-        //writeln("render");
         auto sw = StopWatch(AutoStart.yes);
         ps.heading = edHeading.text.to!double;
         ps.dt = edDt.text.to!double;
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
-        //drawSphere(imgSphere);
         img.copyFrom(imgSphere);
         //drawOneSphereGeodesic(img);
         //auto points = makeOneSphereGeodesic();
         //drawFloorDirect(imgZ, ps);
-        auto points = drawFloorRay(imgFloor, ps, sphere, ps.pos.u, ps.pos.v);
-        drawPoints!Sphere(img, points);
+        auto points = drawFloorRay(imgFloor, ps, geom, ps.pos.u, ps.pos.v);
+        drawPoints!Geom(img, points);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, 512,512);
         txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
@@ -597,13 +579,13 @@ extern (C) int UIAppMain(string[] args) {
                 case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
                 case KeyCode.KEY_W: 
                     auto hdn = ps.heading;
-                    ps.pos = walk!Sphere(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = walk!Geom(ps.pos, hdn, ps.dt, 50); 
                     ps.heading = hdn;
                     edHeading.text = format("%.3g"d, hdn);
                     break;
                 case KeyCode.KEY_S: 
                     auto hdn = ps.heading + 180;
-                    ps.pos = walk!Sphere(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = walk!Geom(ps.pos, hdn, ps.dt, 50); 
                     ps.heading = hdn - 180;
                     while(ps.heading < 0) ps.heading += 360;
                     while(ps.heading >= 360) ps.heading -= 360;
