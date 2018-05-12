@@ -128,48 +128,7 @@ class ImageZ {
     }
 }
 
-void drawSurface(S)(ImageZ img) {
-    enum NU = 1500, NV = 700; // number of mesh points
-    const W2 = img.W / 2, H2 = img.H / 2;
-    const double R = S.R;
-    const double zCenter = 9*R, zScreen = img.W / 1.2;
-    foreach(iv; 1..NV-1) {
-        double v = cast(double)(iv - NV/2) * 2* PI / NV;
-        foreach(iu; 0.. NU) {
-            double u = cast(double)iu * 2.0*PI / NU;
-            double x,y,z;
-            S.embedIn3D(u,v, x,y,z);
-
-            // project on 'screen' plane
-            double z1 = zCenter + z;
-            double k = zScreen / z1;
-            double px = x * k, py = y * k;
-
-            uint clr = S.color(u, v);
-            int sx = W2 + cast(int)(px);
-            int sy = H2 - cast(int)(py);
-            img.putPixelZ(sx, sy, clr, z1);
-        }
-    }
-}
-
 struct UV { double u,v; }
-
-void drawPoints(S)(ImageZ img, UV[] points) {
-    const W2 = img.W / 2, H2 = img.H / 2;
-    const double zCenter = 9 * S.R, zScreen = img.W / 1.2;
-    foreach(p; points) {
-        double x,y,z;
-        S.embedIn3D(p.u, p.v, x,y,z);
-        double z1 = zCenter + z;
-        double k = zScreen / z1;
-        double px = x * k, py = y * k;
-        uint clr = (128 - cast(int)(z/S.R * 100)) << 16;
-        int sx = W2 + cast(int)(px);
-        int sy = H2 - cast(int)(py);
-        img.putPixel(sx, sy, clr);
-    }
-}
 
 // f'(t,y) = drv(y)
 T evolveRK(alias drv, T)(T state, double dt) {
@@ -198,6 +157,7 @@ struct Vec(T, int N) {
 
 alias Dbl4 = Vec!(double, 4);
 enum wallColor = 0xF08000;
+__gshared double globalR = 1000.0;
 
 string[] genCode(alias surfaceEquation)() {
     Expr[] X = surfaceEquation();
@@ -246,9 +206,10 @@ string[] genCode(alias surfaceEquation)() {
 
 class Surface(alias surfaceEquation) {
     enum codes = genCode!surfaceEquation();
-    __gshared static double R = 1000.0;
+    
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
         pragma(msg, codes[0]);
+        const double R = globalR;
         const double cos_v = cos(v);
         const double sin_v = sin(v);
         const double cos_u = cos(u);
@@ -261,6 +222,7 @@ class Surface(alias surfaceEquation) {
         Dbl4 res;
         auto du = res.data[0] = y.data[1]; // u' = u'
         auto dv = res.data[2] = y.data[3]; // v' = v'
+        const double R = globalR;
         const double v = y.data[2], u = y.data[0];
         const double cos_v = cos(v);
         if (abs(cos_v) < 0.0000001) { // handle poles, poorly
@@ -283,6 +245,11 @@ class Surface(alias surfaceEquation) {
             do iu -= 360; while (iu >= 360);
         } else if (iu < 0) {
             do iu += 360; while (iu < 0);
+        }
+        if (iv >= 180) {
+            do iv -= 360; while (iv >= 180);
+        } else if (iv < -180) {
+            do iv += 360; while (iv < -180);
         }
 
         if (iv >= 90) {
@@ -310,12 +277,14 @@ class Surface(alias surfaceEquation) {
 
     static double vlen(double u, double v, double du, double dv) {
         pragma(msg, codes[3]);
+        const double R = globalR;
         const double cos_v = cos(v), sin_v = sin(v);
         const double cos_u = cos(u), sin_u = sin(u);
         mixin(codes[3]);
     }
 
     static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
+        const double R = globalR;
         double cos_v = cos(v0), sin_v = sin(v0);
         double cos_u = cos(u0), sin_u = sin(u0);
         if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
@@ -332,6 +301,7 @@ class Surface(alias surfaceEquation) {
         // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
+        const double R = globalR;
         const double cos_v = cos(v0), sin_v = sin(v0);
         const double sin_u = sin(u0), cos_u = cos(u0);
         enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[6]).txtSimp;
@@ -341,16 +311,10 @@ class Surface(alias surfaceEquation) {
         mixin(up_v_code);
         mixin(product_code);
         double a = acos(product / vlen(u0, v0, du, dv));
-        //double a = acos(R*dv / vlen(u0, v0, du, dv));
         if (du < 0) a = 2*PI - a;
         return a;
     }
 }// Surface
-
-alias Sphere = Surface!sphereEq;
-alias FlatPlane = Surface!planeEq;
-alias Ellipsoid = Surface!ellipsoidEq;
-alias Thingy = Surface!thingyEq;
 
 Expr[] sphereEq() {
     auto R = new Var("R");
@@ -385,101 +349,153 @@ Expr[] thingyEq() {
             mul(R, new Sin("v")) ];
 }
 
-UV[] drawFloorRay(S)(ImageZ img, Params ps, S space, double u0, double v0) {
-    import std.range : iota;
-    const int W = img.W, H = img.H;
-    double screenZ = W / 1.2, camY = H/2;
-    const double x0 = u0, z0 = v0;
-    auto paths = appender!(UV[]);
-    const int pixelWidth = 1;
-    const bool dyndt = ps.dyndt, walls = ps.walls;
-    const int minsy = cast(int)(H/2 / ps.range);//H/2/8;
-    img.fillRows(0, H/2+minsy, 0x505090);
-
-    foreach(sx; iota(-W/2, W/2, pixelWidth)) {
-        double dt = ps.dt;
-        double angle = atan(sx / screenZ) + ps.heading*PI/180;
-        double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
-        double s = 0, t=0, dx,dz;
-        space.courseVector(x0, z0, angle, dx, dz);
-
-        Dbl4 state;
-        state.data[0] = x0;
-        state.data[1] = dx;
-        state.data[2] = z0;
-        state.data[3] = dz;
-
-        int sy = H/2, iters = 0;
-        double nextDist = scrDistAlongRay;
-        while(sy > minsy && iters < 5000) {
-            double x = state.data[0], z = state.data[2];
-
-            if (walls) {
-                auto clr = space.color(x, z);
-                if (clr == wallColor) {
-                    int totalh = cast(int) (H * scrDistAlongRay / s);
-                    int h = totalh <= H-2 ? totalh : H-2;
-                    int y0 = H/2-1-h/2;
-                    int tx = cast(int)((x*cos(z) + z)*500) & 127;
-                    double ky = 128.0 / totalh;
-                    double ty0 = h==totalh ? 0 :  (totalh-h)/2 * ky;
-                    foreach(i; 0..h) {
-                        int ty = cast(int) (ky*i + ty0);
-                        clr = wallTexture[tx*128 + ty];
-                        img.putPixel(sx + W/2, y0 + i, clr);
-                    }
-                    break;
-                }
-            }
-
-            if (s >= nextDist) {
-                auto clr = space.color(x, z);
-                foreach(d; 0..pixelWidth)
-                    img.putPixel(sx + W/2 + d, sy + H/2-1, clr);
-                sy--;
-                nextDist = scrDistAlongRay * camY / sy;
-                if ((sx & 63)==0) paths ~= UV(x,z);
-                if (dyndt) dt = sqrt(nextDist - s);
-            }
-            double du = state.data[1] * dt, dv = state.data[3] * dt;
-            double ds = space.vlen(x, z, du, dv);
-            state = evolveRK!(space.geodesicStep)(state, dt);
-            t += dt;
-            s += ds;
-            iters++;
-        }
-    }// for sx
-    return paths.data;
-}
-
-UV walk(S)(UV pos, ref double heading, double dt, double dist) {
-    double angle = heading*PI/180;
-    double s = 0, du,dv;
-    S.courseVector(pos.u, pos.v, angle, du, dv);
-    Dbl4 state;
-    state.data[0] = pos.u;
-    state.data[1] = du;
-    state.data[2] = pos.v;
-    state.data[3] = dv;
-    int iters = 0;
-    while(s < dist && iters < 1000) {
-        double u = state.data[0], v = state.data[2];
-        du = state.data[1] * dt; dv = state.data[3] * dt;
-        double ds = S.vlen(u, v, du, dv);
-        state = evolveRK!(S.geodesicStep)(state, dt);
-        s += ds;
-        iters++;
-    }
-    double u = state.data[0], v = state.data[2];
-    double a = S.courseAngle(u,v, state.data[1], state.data[3]);
-    heading = a*180/PI;
-    return UV(u, v);
-}
-
 class Params {
     double heading, dt, range;
     UV pos;
     bool dyndt, walls;
+}
+
+class Renderer {
+    abstract void drawSurface(ImageZ img);
+    abstract void drawPoints(ImageZ img, UV[] points);
+    abstract UV[] drawFloorRay(ImageZ img, Params ps, double u0, double v0);
+    abstract UV walk(UV pos, ref double heading, double dt, double dist);
+}
+
+class Render(alias surfaceEq) : Renderer {
+    alias Surf = Surface!surfaceEq;
+
+    override void drawSurface(ImageZ img) {
+        enum NU = 1500, NV = 700; // number of mesh points
+        const W2 = img.W / 2, H2 = img.H / 2;
+        const double R = globalR;
+        const double zCenter = 9*R, zScreen = img.W / 1.2;
+        foreach(iv; 1..NV-1) {
+            double v = cast(double)(iv - NV/2) * 2* PI / NV;
+            foreach(iu; 0.. NU) {
+                double u = cast(double)iu * 2.0*PI / NU;
+                double x,y,z;
+                Surf.embedIn3D(u,v, x,y,z);
+
+                // project on 'screen' plane
+                double z1 = zCenter + z;
+                double k = zScreen / z1;
+                double px = x * k, py = y * k;
+
+                uint clr = Surf.color(u, v);
+                int sx = W2 + cast(int)(px);
+                int sy = H2 - cast(int)(py);
+                img.putPixelZ(sx, sy, clr, z1);
+            }
+        }
+    }
+
+    override void drawPoints(ImageZ img, UV[] points) {
+        const W2 = img.W / 2, H2 = img.H / 2;
+        const double zCenter = 9 * globalR, zScreen = img.W / 1.2;
+        foreach(p; points) {
+            double x,y,z;
+            Surf.embedIn3D(p.u, p.v, x,y,z);
+            double z1 = zCenter + z;
+            double k = zScreen / z1;
+            double px = x * k, py = y * k;
+            uint clr = (128 - cast(int)(z/globalR * 100)) << 16;
+            int sx = W2 + cast(int)(px);
+            int sy = H2 - cast(int)(py);
+            img.putPixel(sx, sy, clr);
+        }
+    }
+
+
+    override UV[] drawFloorRay(ImageZ img, Params ps, double u0, double v0) {
+        import std.range : iota;
+        const int W = img.W, H = img.H;
+        double screenZ = W / 1.2, camY = H/2;
+        const double x0 = u0, z0 = v0;
+        auto paths = appender!(UV[]);
+        const bool dyndt = ps.dyndt, walls = ps.walls;
+        const int minsy = cast(int)(H/2 / ps.range);
+        img.fillRows(0, H/2+minsy, 0x505090);
+
+        foreach(sx; iota(-W/2, W/2)) {
+            double dt = ps.dt;
+            double angle = atan(sx / screenZ) + ps.heading*PI/180;
+            double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
+            double s = 0, dx,dz;
+            Surf.courseVector(x0, z0, angle, dx, dz);
+
+            Dbl4 state;
+            state.data[0] = x0;
+            state.data[1] = dx;
+            state.data[2] = z0;
+            state.data[3] = dz;
+
+            int sy = H/2, iters = 0;
+            double nextDist = scrDistAlongRay;
+            while(sy > minsy && iters < 5000) {
+                double x = state.data[0], z = state.data[2];
+
+                if (walls) {
+                    auto clr = Surf.color(x, z);
+                    if (clr == wallColor) {
+                        int totalh = cast(int) (H * scrDistAlongRay / s);
+                        int h = totalh <= H-2 ? totalh : H-2;
+                        int y0 = H/2-1-h/2;
+                        int tx = cast(int)((x*cos(z) + z)*500) & 127;
+                        double ky = 128.0 / totalh;
+                        double ty0 = h==totalh ? 0 :  (totalh-h)/2 * ky;
+                        foreach(i; 0..h) {
+                            int ty = cast(int) (ky*i + ty0);
+                            clr = wallTexture[tx*128 + ty];
+                            img.putPixel(sx + W/2, y0 + i, clr);
+                        }
+                        break;
+                    }
+                }
+
+                if (s >= nextDist) {
+                    auto clr = Surf.color(x, z);
+                    img.putPixel(sx + W/2, sy + H/2-1, clr);
+                    sy--;
+                    nextDist = scrDistAlongRay * camY / sy;
+                    if ((sx & 63)==0) paths ~= UV(x,z);
+                    if (dyndt) dt = sqrt(nextDist - s);
+                }
+                double du = state.data[1] * dt, dv = state.data[3] * dt;
+                double ds = Surf.vlen(x, z, du, dv);
+                state = evolveRK!(Surf.geodesicStep)(state, dt);
+                s += ds;
+                iters++;
+            }
+        }// for sx
+        return paths.data;
+    }
+
+    override UV walk(UV pos, ref double heading, double dt, double dist) {
+        double angle = heading*PI/180;
+        double s = 0, du,dv;
+        Surf.courseVector(pos.u, pos.v, angle, du, dv);
+        Dbl4 state;
+        state.data[0] = pos.u;
+        state.data[1] = du;
+        state.data[2] = pos.v;
+        state.data[3] = dv;
+        int iters = 0;
+        while(s < dist && iters < 1000) {
+            double u = state.data[0], v = state.data[2];
+            du = state.data[1] * dt; dv = state.data[3] * dt;
+            double ds = Surf.vlen(u, v, du, dv);
+            state = evolveRK!(Surf.geodesicStep)(state, dt);
+            s += ds;
+            iters++;
+        }
+        double u = state.data[0], v = state.data[2];
+        double a = Surf.courseAngle(u,v, state.data[1], state.data[3]);
+        heading = a*180/PI;
+        while(heading < 0) heading += 360;
+        while(heading >= 360) heading -= 360;
+        return UV(u, v);
+    }
 }
 
 extern (C) int UIAppMain(string[] args) {
@@ -529,10 +545,8 @@ extern (C) int UIAppMain(string[] args) {
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
-    alias Geom = Thingy;
-
-    auto geom = new Geom();
-    drawSurface!Geom(imgSphere);
+    Renderer rend = new Render!thingyEq;
+    rend.drawSurface(imgSphere);
 
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
@@ -544,14 +558,10 @@ extern (C) int UIAppMain(string[] args) {
         auto rng = edRange.text.to!double;
         if (rng >= 1 && rng < 10) ps.range = rng;
         auto r = edR.text.to!double;
-        if (r >= 100 && r <= 1000000) Geom.R = r; 
-        // ps.R = 
+        if (r >= 100 && r <= 1000000) globalR = r; 
         img.copyFrom(imgSphere);
-        //drawOneSphereGeodesic(img);
-        //auto points = makeOneSphereGeodesic();
-        //drawFloorDirect(imgZ, ps);
-        auto points = drawFloorRay(imgFloor, ps, geom, ps.pos.u, ps.pos.v);
-        drawPoints!Geom(img, points);
+        auto points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
+        rend.drawPoints(img, points);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, 512,512);
         txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
@@ -570,13 +580,13 @@ extern (C) int UIAppMain(string[] args) {
                 case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
                 case KeyCode.KEY_W: 
                     auto hdn = ps.heading;
-                    ps.pos = walk!Geom(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50); 
                     ps.heading = hdn;
                     edHeading.text = format("%.3g"d, hdn);
                     break;
                 case KeyCode.KEY_S: 
                     auto hdn = ps.heading + 180;
-                    ps.pos = walk!Geom(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50); 
                     ps.heading = hdn - 180;
                     while(ps.heading < 0) ps.heading += 360;
                     while(ps.heading >= 360) ps.heading -= 360;
