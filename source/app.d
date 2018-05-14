@@ -161,7 +161,7 @@ __gshared double globalR = 1000.0;
 
 string[] genCode(alias surfaceEquation)() {
     Expr[] X = surfaceEquation();
-    string embed = format("x = %s; y = %s; z = %s;", X[0].code, X[1].code, X[2].code);
+    string embed = format("x = %s; y = %s; z = %s;", X[0].code, X[1].code, X[2].code).addTrigNeeded;
 
     auto Xu = X.diff("u"); // basis vectors
     auto Xv = X.diff("v");
@@ -173,8 +173,8 @@ string[] genCode(alias surfaceEquation)() {
     ginv[0][0] = div(g[1][1], det_g);
     ginv[0][1] = ginv[1][0] = div(neg(g[0][1]), det_g);
     ginv[1][1] = div(g[0][0], det_g);
-    
-    Expr[2][2][2] C; // Christoffel symbols 
+
+    Expr[2][2][2] C; // Christoffel symbols
     string[] dx = ["u","v"];
     auto two = new Const("2");
     foreach(k; 0..2)
@@ -192,28 +192,34 @@ string[] genCode(alias surfaceEquation)() {
             }
     // res.data[1] = -C[0][0][0]*du*du - 2 * C[0][0][1]*du*dv - C[0][1][1]*dv*dv; //u''
     // res.data[3] = -C[1][0][0]*du*du - 2 * C[1][0][1]*du*dv - C[1][1][1]*dv*dv; //v''
-    string u_accel = format("res.data[1] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n", 
-                            C[0][0][0].code, C[0][0][1].code, C[0][1][1].code).txtSimp; 
-    string v_accel = format("res.data[3] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n", 
-                            C[1][0][0].code, C[1][0][1].code, C[1][1][1].code).txtSimp; 
+    string u_accel = format("res.data[1] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n",
+                            C[0][0][0].code, C[0][0][1].code, C[0][1][1].code).txtSimp;
+    string v_accel = format("res.data[3] = -%s*du*du - 2 * %s*du*dv - %s*dv*dv;\n",
+                            C[1][0][0].code, C[1][0][1].code, C[1][1][1].code).txtSimp;
+    string accel = addTrigNeeded(u_accel ~ v_accel, false);
 
     Expr du = new Var("du"), dv = new Var("dv");
     Expr mag = add(mul(g[0][0], du, du), mul(two, g[0][1], du, dv), mul(g[1][1], dv,dv));
-    string vlen = format("return sqrt(%s);", mag.code).txtSimp;                            
-    return [embed, u_accel, v_accel, vlen, g[0][0].code, g[0][1].code, g[1][1].code];
-    //      0      1        2         3      4            5              6
+    string vlen = format("return sqrt(%s);", mag.code).txtSimp.addTrigNeeded;
+    return [embed, accel,  vlen, g[0][0].code, g[0][1].code, g[1][1].code];
+    //      0      1        2         3           4            5
+}
+
+string addTrigNeeded(string e, bool includeCosV=true) {
+    return
+        (e.canFind("sin_v") ? "const double sin_v = sin(v);\n" : "") ~
+        (e.canFind("cos_v") && includeCosV ? "const double cos_v = cos(v);\n" : "") ~
+        (e.canFind("sin_u") ? "const double sin_u = sin(u);\n" : "") ~
+        (e.canFind("cos_u") ? "const double cos_u = cos(u);\n" : "") ~
+        e;
 }
 
 class Surface(alias surfaceEquation) {
     enum codes = genCode!surfaceEquation();
-    
+
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
         pragma(msg, codes[0]);
         const double R = globalR;
-        const double cos_v = cos(v);
-        const double sin_v = sin(v);
-        const double cos_u = cos(u);
-        const double sin_u = sin(u);
         mixin(codes[0]);
     }
 
@@ -230,12 +236,8 @@ class Surface(alias surfaceEquation) {
             res.data[3] = dv;
             return res;
         }
-        const double sin_v = sin(v);
-        const double sin_u = sin(u), cos_u = cos(u);
         pragma(msg, codes[1]);
-        pragma(msg, codes[2]);
         mixin(codes[1]);
-        mixin(codes[2]);
         return res;
     }
 
@@ -276,11 +278,9 @@ class Surface(alias surfaceEquation) {
     }
 
     static double vlen(double u, double v, double du, double dv) {
-        pragma(msg, codes[3]);
+        pragma(msg, codes[2]);
         const double R = globalR;
-        const double cos_v = cos(v), sin_v = sin(v);
-        const double cos_u = cos(u), sin_u = sin(u);
-        mixin(codes[3]);
+        mixin(codes[2]);
     }
 
     static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
@@ -288,8 +288,8 @@ class Surface(alias surfaceEquation) {
         double cos_v = cos(v0), sin_v = sin(v0);
         double cos_u = cos(u0), sin_u = sin(u0);
         if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
-        enum u_code = format("du = sin(angle) / sqrt(%s);", codes[4]).txtSimp;
-        enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[6]).txtSimp;
+        enum u_code = format("du = sin(angle) / sqrt(%s);", codes[3]).txtSimp;
+        enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[5]).txtSimp;
         pragma(msg, u_code);
         pragma(msg, v_code);
         mixin(u_code);
@@ -304,8 +304,8 @@ class Surface(alias surfaceEquation) {
         const double R = globalR;
         const double cos_v = cos(v0), sin_v = sin(v0);
         const double sin_u = sin(u0), cos_u = cos(u0);
-        enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[6]).txtSimp;
-        enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[5], codes[6]).txtSimp;
+        enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[5]).txtSimp;
+        enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[4], codes[5]).txtSimp;
         pragma(msg, up_v_code);
         pragma(msg, product_code);
         mixin(up_v_code);
@@ -346,7 +346,7 @@ Expr[] thingyEq() {
 
     return [mul(R, add(two, new Cos("v")), new Cos("u")),
             mul(R, add(two, new Cos("v")), new Sin("u")),
-            mul(R, new Sin("v")) ];
+            mul(neg(R), new Sin("v")) ];
 }
 
 class Params {
@@ -362,6 +362,8 @@ class Renderer {
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
 }
 
+double getzCenter() { return 3*globalR; }
+
 class Render(alias surfaceEq) : Renderer {
     alias Surf = Surface!surfaceEq;
 
@@ -369,9 +371,9 @@ class Render(alias surfaceEq) : Renderer {
         enum NU = 1500, NV = 700; // number of mesh points
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
-        const double zCenter = 9*R, zScreen = img.W / 1.2;
+        const double zCenter = getzCenter(), zScreen = img.W / 1.2;
         foreach(iv; 1..NV-1) {
-            double v = cast(double)(iv - NV/2) * 2* PI / NV;
+            double v = cast(double)(iv - NV/2) * PI / NV;
             foreach(iu; 0.. NU) {
                 double u = cast(double)iu * 2.0*PI / NU;
                 double x,y,z;
@@ -392,7 +394,7 @@ class Render(alias surfaceEq) : Renderer {
 
     override void drawPoints(ImageZ img, UV[] points) {
         const W2 = img.W / 2, H2 = img.H / 2;
-        const double zCenter = 9 * globalR, zScreen = img.W / 1.2;
+        const double zCenter = getzCenter(), zScreen = img.W / 1.2;
         foreach(p; points) {
             double x,y,z;
             Surf.embedIn3D(p.u, p.v, x,y,z);
@@ -524,7 +526,7 @@ extern (C) int UIAppMain(string[] args) {
                 TextWidget {text: "Range:" }
                 EditLine { text: "6"; id: "range"; layoutWidth: 70}
                 TextWidget {text: "R:" }
-                EditLine { text: "1000"; id: "R"; layoutWidth: 70}                
+                EditLine { text: "1000"; id: "R"; layoutWidth: 70}
                 TextWidget {text:""; id:"out"}
             }
             DrawingBoard {id: "pic"}
@@ -545,7 +547,7 @@ extern (C) int UIAppMain(string[] args) {
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
-    Renderer rend = new Render!thingyEq;
+    Renderer rend = new Render!sphereEq;// thingyEq;
     rend.drawSurface(imgSphere);
 
     void render() {
@@ -558,7 +560,7 @@ extern (C) int UIAppMain(string[] args) {
         auto rng = edRange.text.to!double;
         if (rng >= 1 && rng < 10) ps.range = rng;
         auto r = edR.text.to!double;
-        if (r >= 100 && r <= 1000000) globalR = r; 
+        if (r >= 100 && r <= 1000000) globalR = r;
         img.copyFrom(imgSphere);
         auto points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
         rend.drawPoints(img, points);
@@ -578,15 +580,15 @@ extern (C) int UIAppMain(string[] args) {
             switch(e.keyCode) {
                 case KeyCode.KEY_A: ps.heading -= 10; edHeading.text = ps.heading.to!dstring; break;
                 case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
-                case KeyCode.KEY_W: 
+                case KeyCode.KEY_W:
                     auto hdn = ps.heading;
-                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50);
                     ps.heading = hdn;
                     edHeading.text = format("%.3g"d, hdn);
                     break;
-                case KeyCode.KEY_S: 
+                case KeyCode.KEY_S:
                     auto hdn = ps.heading + 180;
-                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50); 
+                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50);
                     ps.heading = hdn - 180;
                     while(ps.heading < 0) ps.heading += 360;
                     while(ps.heading >= 360) ps.heading -= 360;
