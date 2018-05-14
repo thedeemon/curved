@@ -392,6 +392,14 @@ class Render(alias surfaceEq) : Renderer {
         }
     }
 
+    ImageZ[] wrkImages;
+
+    void ensureImagesCreated(size_t num, int w, int h) {
+        wrkImages.length = num;
+        foreach(ref im; wrkImages)
+            if (im is null) im = new ImageZ(w,h);
+    }
+
     override void drawPoints(ImageZ img, UV[] points) {
         const W2 = img.W / 2, H2 = img.H / 2;
         const double zCenter = getzCenter(), zScreen = img.W / 1.2;
@@ -408,18 +416,33 @@ class Render(alias surfaceEq) : Renderer {
         }
     }
 
+    int[] whoseCol;
 
     override UV[] drawFloorRay(ImageZ img, Params ps, double u0, double v0) {
         import std.range : iota;
+        import std.parallelism; // : parallel, totalCPUs;
         const int W = img.W, H = img.H;
         double screenZ = W / 1.2, camY = H/2;
         const double x0 = u0, z0 = v0;
         auto paths = appender!(UV[]);
         const bool dyndt = ps.dyndt, walls = ps.walls;
         const int minsy = cast(int)(H/2 / ps.range);
-        img.fillRows(0, H/2+minsy, 0x505090);
+        ensureImagesCreated(taskPool.size + 1, W, H);
 
-        foreach(sx; iota(-W/2, W/2)) {
+        if (walls) {
+            foreach(im; wrkImages[].parallel)
+                im.fillRows(0, H/2+minsy, 0x505090);
+        } else
+            img.fillRows(0, H/2+minsy, 0x505090);
+        //writeln("totalCPUs: ", totalCPUs, " poolSize: ", taskPool.size);
+
+        auto pathApps = iota(taskPool.size + 1).amap!(i => appender!(UV[]));
+        whoseCol.length = W;
+
+        foreach(sx; iota(-W/2, W/2).parallel) {
+            auto idx = taskPool.workerIndex;
+            //writeln("idx=", idx);
+            whoseCol[sx+W/2] = cast(int)idx;
             double dt = ps.dt;
             double angle = atan(sx / screenZ) + ps.heading*PI/180;
             double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
@@ -449,7 +472,7 @@ class Render(alias surfaceEq) : Renderer {
                         foreach(i; 0..h) {
                             int ty = cast(int) (ky*i + ty0);
                             clr = wallTexture[tx*128 + ty];
-                            img.putPixel(sx + W/2, y0 + i, clr);
+                            wrkImages[idx].putPixel(sx + W/2, y0 + i, clr);
                         }
                         break;
                     }
@@ -457,10 +480,10 @@ class Render(alias surfaceEq) : Renderer {
 
                 if (s >= nextDist) {
                     auto clr = Surf.color(x, z);
-                    img.putPixel(sx + W/2, sy + H/2-1, clr);
+                    wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
-                    if ((sx & 63)==0) paths ~= UV(x,z);
+                    if ((sx & 63)==0) pathApps[idx] ~= UV(x,z);
                     if (dyndt) dt = sqrt(nextDist - s);
                 }
                 double du = state.data[1] * dt, dv = state.data[3] * dt;
@@ -470,7 +493,17 @@ class Render(alias surfaceEq) : Renderer {
                 iters++;
             }
         }// for sx
-        return paths.data;
+
+        foreach(sx; 0..W) {
+            auto idx = whoseCol[sx];
+            int y0 = walls ? 0 : H/2+minsy;
+            foreach(y; y0 .. H) {
+                auto j = y*W+sx;
+                img.colors[j] = wrkImages[idx].colors[j];
+            }
+        }
+
+        return pathApps.map!(a => a.data).join; //paths.data;
     }
 
     override UV walk(UV pos, ref double heading, double dt, double dist) {
