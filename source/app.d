@@ -1,8 +1,10 @@
 import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format;
+import std.algorithm : canFind, map;
 import symbolic;
 mixin APP_ENTRY_POINT;
 
 __gshared uint[] wallTexture;
+__gshared ColorDrawBuf worldMap;
 
 class DrawingBoard : ImageWidget {
 	ColorDrawBuf cdbuf;
@@ -74,10 +76,9 @@ class DrawingBoard : ImageWidget {
                     wallTexture[row*16+y+ (dx + n*32 + x)*128] = 0xCDC5BA  + (r<<16) + (g<<8) + b;
                 }
         }
-        foreach(y; 0..128) {
-            uint* ptr = cdbuf.scanLine(y);
-            ptr[0..128] = wallTexture[y*128 .. y*128+128];
-        }
+
+        enum mapData = cast(immutable ubyte[]) import("map.png");
+        worldMap = loadImage(mapData, "map.png");
     }
 }
 
@@ -214,6 +215,32 @@ string addTrigNeeded(string e, bool includeCosV=true) {
         e;
 }
 
+uint worldColor(double u, double v) {
+    int iu = cast(int)(u/PI*360), iv = cast(int)(v/PI*360);
+    if (iu >= 720) {
+        do iu -= 720; while (iu >= 720);
+    } else if (iu < 0) {
+        do iu += 720; while (iu < 0);
+    }
+    if (iv >= 360) {
+        do iv -= 720; while (iv >= 360);
+    } else if (iv < -360) {
+        do iv += 360; while (iv < -360);
+    }
+
+    if (iv >= 180) {
+        iv = 360 - iv;
+    } else if (iv < -180) {
+        iv = -360 - iv;
+    }
+    iv = 180 - iv;
+    assert(iu >= 0);
+    assert(iu < 720);
+    assert(iv >= 0);
+    assert(iv < 360);
+    return worldMap.scanLine(iv)[iu];
+}
+
 class Surface(alias surfaceEquation) {
     enum codes = genCode!surfaceEquation();
 
@@ -242,7 +269,8 @@ class Surface(alias surfaceEquation) {
     }
 
     static uint color(double u, double v) {
-        int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+        return worldColor(u,v);
+        /*int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
         if (iu >= 360) {
             do iu -= 360; while (iu >= 360);
         } else if (iu < 0) {
@@ -274,7 +302,7 @@ class Surface(alias surfaceEquation) {
             if (mv >= 3 && mv < 6 && mu >= 13 && mu < 16)
                 clr = ((iv + 90)/3 * 4)<<8;
         }
-        return clr;
+        return clr;*/
     }
 
     static double vlen(double u, double v, double du, double dv) {
@@ -358,7 +386,7 @@ class Params {
 class Renderer {
     abstract void drawSurface(ImageZ img);
     abstract void drawPoints(ImageZ img, UV[] points);
-    abstract UV[] drawFloorRay(ImageZ img, Params ps, double u0, double v0);
+    abstract UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0);
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
 }
 
@@ -418,12 +446,11 @@ class Render(alias surfaceEq) : Renderer {
 
     int[] whoseCol;
 
-    override UV[] drawFloorRay(ImageZ img, Params ps, double u0, double v0) {
+    override UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0) {
         import std.range : iota;
-        import std.parallelism; // : parallel, totalCPUs;
+        import std.parallelism;
         const int W = img.W, H = img.H;
         double screenZ = W / 1.2, camY = H/2;
-        const double x0 = u0, z0 = v0;
         auto paths = appender!(UV[]);
         const bool dyndt = ps.dyndt, walls = ps.walls;
         const int minsy = cast(int)(H/2 / ps.range);
@@ -446,27 +473,27 @@ class Render(alias surfaceEq) : Renderer {
             double dt = ps.dt;
             double angle = atan(sx / screenZ) + ps.heading*PI/180;
             double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
-            double s = 0, dx,dz;
-            Surf.courseVector(x0, z0, angle, dx, dz);
+            double s = 0, du,dv;
+            Surf.courseVector(u0, v0, angle, du, dv);
 
             Dbl4 state;
-            state.data[0] = x0;
-            state.data[1] = dx;
-            state.data[2] = z0;
-            state.data[3] = dz;
+            state.data[0] = u0;
+            state.data[1] = du;
+            state.data[2] = v0;
+            state.data[3] = dv;
 
             int sy = H/2, iters = 0;
             double nextDist = scrDistAlongRay;
             while(sy > minsy && iters < 5000) {
-                double x = state.data[0], z = state.data[2];
+                const double u = state.data[0], v = state.data[2];
 
                 if (walls) {
-                    auto clr = Surf.color(x, z);
+                    auto clr = Surf.color(u, v);
                     if (clr == wallColor) {
                         int totalh = cast(int) (H * scrDistAlongRay / s);
                         int h = totalh <= H-2 ? totalh : H-2;
                         int y0 = H/2-1-h/2;
-                        int tx = cast(int)((x*cos(z) + z)*500) & 127;
+                        int tx = cast(int)((u*cos(v) + v)*500) & 127;
                         double ky = 128.0 / totalh;
                         double ty0 = h==totalh ? 0 :  (totalh-h)/2 * ky;
                         foreach(i; 0..h) {
@@ -479,24 +506,23 @@ class Render(alias surfaceEq) : Renderer {
                 }
 
                 if (s >= nextDist) {
-                    auto clr = Surf.color(x, z);
+                    auto clr = Surf.color(u, v);
                     wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
-                    if ((sx & 63)==0) pathApps[idx] ~= UV(x,z);
+                    if ((sx & 63)==0) pathApps[idx] ~= UV(u,v);
                     if (dyndt) dt = sqrt(nextDist - s);
                 }
-                double du = state.data[1] * dt, dv = state.data[3] * dt;
-                double ds = Surf.vlen(x, z, du, dv);
+                double ds = Surf.vlen(u, v, state.data[1] * dt, state.data[3] * dt);
                 state = evolveRK!(Surf.geodesicStep)(state, dt);
                 s += ds;
                 iters++;
             }
         }// for sx
 
+        int y0 = walls ? 0 : H/2+minsy;
         foreach(sx; 0..W) {
             auto idx = whoseCol[sx];
-            int y0 = walls ? 0 : H/2+minsy;
             foreach(y; y0 .. H) {
                 auto j = y*W+sx;
                 img.colors[j] = wrkImages[idx].colors[j];
@@ -531,12 +557,14 @@ class Render(alias surfaceEq) : Renderer {
         while(heading >= 360) heading -= 360;
         return UV(u, v);
     }
-}
+}//Render
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
     int w= 880, h = 700;
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
+
+    embeddedResourceList.addResources( embedResource!"map.png" );
 
     version(Windows) {
         w = w.pixelsToPoints; h = h.pixelsToPoints;
