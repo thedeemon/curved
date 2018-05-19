@@ -1,13 +1,5 @@
 syntax: glob
-*.ncb
-*.plg
-*.bsc
-*.pch
-*.orig
-*.rej
-*.bk
 *.bmp
-*.suo
 *.lib
 *.log
 *.exe
@@ -16,4 +8,4 @@ Release/*
 .dub/*
 curved
 *.json
-*.txt
+
