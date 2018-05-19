@@ -564,8 +564,6 @@ extern (C) int UIAppMain(string[] args) {
     int w= 880, h = 700;
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
-    embeddedResourceList.addResources( embedResource!"map.png" );
-
     version(Windows) {
         w = w.pixelsToPoints; h = h.pixelsToPoints;
     }
@@ -578,6 +576,7 @@ extern (C) int UIAppMain(string[] args) {
             layoutWidth: 750
             HorizontalLayout {
                 Button {text: "Render"; id: "btnRender"}
+                ComboBox {id: "world"}
                 TextWidget {text: "Heading:" }
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
                 TextWidget {text: "dt:" }
@@ -601,6 +600,8 @@ extern (C) int UIAppMain(string[] args) {
     auto cbWalls = window.mainWidget.childById!CheckBox("walls");
     auto edRange = window.mainWidget.childById!EditLine("range");
     auto edR = window.mainWidget.childById!EditLine("R");
+    auto worldCombo = window.mainWidget.childById!ComboBox("world");
+    worldCombo.items = ["Ball"d, "Earth"d, "Fat Ball"d, "Donut"d];
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
     auto imgFloor = new ImageZ(512,512);
