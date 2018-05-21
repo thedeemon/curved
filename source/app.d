@@ -1,4 +1,4 @@
-import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format;
+import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format, std.meta;
 import symbolic, img, geometry;
 mixin APP_ENTRY_POINT;
 
@@ -122,7 +122,12 @@ extern (C) int UIAppMain(string[] args) {
     auto edRange = window.mainWidget.childById!EditLine("range");
     auto edR = window.mainWidget.childById!EditLine("R");
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
-    worldCombo.items = ["Ball"d, "Earth"d, "Fat Ball"d, "Donut"d];
+
+    Renderer[] worlds;
+    foreach(Wld; AliasSeq!(Sphere, Earth, FatBall, Donut))
+        worlds ~= new Render!Wld;
+
+    worldCombo.items = worlds.amap!(w => w.name.to!dstring);
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
     auto imgFloor = new ImageZ(512,512);
@@ -130,7 +135,7 @@ extern (C) int UIAppMain(string[] args) {
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
-    Renderer rend = new Render!Earth;// thingyEq;
+    Renderer rend = worlds[0];// thingyEq;
     rend.drawSurface(imgSphere);
 
     void render() {
@@ -153,6 +158,13 @@ extern (C) int UIAppMain(string[] args) {
     }
 
     window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
+        render();
+        return true;
+    };
+
+    worldCombo.itemClick = delegate(Widget wgt, int idx) {
+        rend = worlds[idx];
+        rend.drawSurface(imgSphere);
         render();
         return true;
     };

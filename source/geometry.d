@@ -91,7 +91,7 @@ string addTrigNeeded(string e, bool includeCosV=true) {
         e;
 }
 
-uint worldColor(double u, double v) {
+uint earthColor(double u, double v) {
     int iu = cast(int)(u/PI*360), iv = cast(int)(v/PI*360);
     if (iu >= 720) {
         do iu -= 720; while (iu >= 720);
@@ -115,6 +115,41 @@ uint worldColor(double u, double v) {
     assert(iv >= 0);
     assert(iv < 360);
     return worldMap.scanLine(iv)[iu];
+}
+
+uint synthColor(double u, double v) {
+        int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+        if (iu >= 360) {
+            do iu -= 360; while (iu >= 360);
+        } else if (iu < 0) {
+            do iu += 360; while (iu < 0);
+        }
+        if (iv >= 180) {
+            do iv -= 360; while (iv >= 180);
+        } else if (iv < -180) {
+            do iv += 360; while (iv < -180);
+        }
+
+        if (iv >= 90) {
+            iv = 180 - iv;
+        } else if (iv < -90) {
+            iv = -180 - iv;
+        }
+        // iu: 0..360,  iv: -90..90
+
+        int c = ((iu ^ iv) & 31)*4 + 64;
+        uint clr = (c << 16) + (c<<8) + c;
+        int mu = iu % 20, mv = (iv + 180) % 20;
+        if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
+            clr = wallColor; //squares
+        else {
+            if (mv >= 13 && mv < 16 && mu >= 3 && mu < 6)
+                clr = (iu/3 * 2)<<16;
+            else
+            if (mv >= 3 && mv < 6 && mu >= 13 && mu < 16)
+                clr = ((iv + 90)/3 * 4)<<8;
+        }
+        return clr;
 }
 
 class Surface(alias surfaceEquation) {
@@ -142,43 +177,6 @@ class Surface(alias surfaceEquation) {
         pragma(msg, codes[1]);
         mixin(codes[1]);
         return res;
-    }
-
-    static uint color(double u, double v) {
-        return worldColor(u,v);
-        /*int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
-        if (iu >= 360) {
-            do iu -= 360; while (iu >= 360);
-        } else if (iu < 0) {
-            do iu += 360; while (iu < 0);
-        }
-        if (iv >= 180) {
-            do iv -= 360; while (iv >= 180);
-        } else if (iv < -180) {
-            do iv += 360; while (iv < -180);
-        }
-
-        if (iv >= 90) {
-            iv = 180 - iv;
-        } else if (iv < -90) {
-            iv = -180 - iv;
-        }
-        // iu: 0..360,  iv: -90..90
-
-        // double l = (sin(v) + 1.0)*0.5;
-        int c = ((iu ^ iv) & 31)*4 + 64;
-        uint clr = (c << 16) + (c<<8) + c;
-        int mu = iu % 20, mv = (iv + 180) % 20;
-        if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
-            clr = wallColor; //squares
-        else {
-            if (mv >= 13 && mv < 16 && mu >= 3 && mu < 6)
-                clr = (iu/3 * 2)<<16;
-            else
-            if (mv >= 3 && mv < 6 && mu >= 13 && mu < 16)
-                clr = ((iv + 90)/3 * 4)<<8;
-        }
-        return clr;*/
     }
 
     static double vlen(double u, double v, double du, double dv) {
@@ -257,30 +255,35 @@ struct Sphere {
     static string name = "Ball";
     alias equation = sphereEq;
     static double distance = 3.0;
+    alias color = synthColor;
 }
 
 struct Earth {
     static string name = "Earth";
     alias equation = sphereEq;
     static double distance = 3.0;
+    alias color = earthColor;
 }
 
 struct Plane {
     static string name = "Plane";
     alias equation = planeEq;
     static double distance = 3.0;
+    alias color = synthColor;
 }
 
 struct FatBall {
     static string name = "Fat ball";
     alias equation = ellipsoidEq;
     static double distance = 3.0;
+    alias color = synthColor;
 }
 
 struct Donut {
-    static string name = "Fat ball";
+    static string name = "Donut";
     alias equation = torusEq;
     static double distance = 9.0;
+    alias color = synthColor;
 }
 
 class Params {
@@ -294,18 +297,26 @@ class Renderer {
     abstract void drawPoints(ImageZ img, UV[] points);
     abstract UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0);
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
+    abstract string name();
 }
 
 class Render(World) : Renderer {
     alias Surf = Surface!(World.equation);
+
+    override string name() { return World.name; }
 
     override void drawSurface(ImageZ img) {
         enum NU = 1500, NV = 700; // number of mesh points
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
         const double zCenter = R * World.distance, zScreen = img.W / 1.2;
+        static if (is(World==Donut))
+            const double vk = 2.0;
+        else
+            const double vk = 1.0;
+        img.clear();
         foreach(iv; 1..NV-1) {
-            double v = cast(double)(iv - NV/2) * PI / NV;
+            double v = cast(double)(iv - NV/2) * vk * PI / NV;
             foreach(iu; 0.. NU) {
                 double u = cast(double)iu * 2.0*PI / NU;
                 double x,y,z;
@@ -316,7 +327,7 @@ class Render(World) : Renderer {
                 double k = zScreen / z1;
                 double px = x * k, py = y * k;
 
-                uint clr = Surf.color(u, v);
+                uint clr = World.color(u, v);
                 int sx = W2 + cast(int)(px);
                 int sy = H2 - cast(int)(py);
                 img.putPixelZ(sx, sy, clr, z1);
@@ -392,7 +403,7 @@ class Render(World) : Renderer {
                 const double u = state.data[0], v = state.data[2];
 
                 if (walls) {
-                    auto clr = Surf.color(u, v);
+                    auto clr = World.color(u, v);
                     if (clr == wallColor) {
                         int totalh = cast(int) (H * scrDistAlongRay / s);
                         int h = totalh <= H-2 ? totalh : H-2;
@@ -410,7 +421,7 @@ class Render(World) : Renderer {
                 }
 
                 if (s >= nextDist) {
-                    auto clr = Surf.color(u, v);
+                    auto clr = World.color(u, v);
                     wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
