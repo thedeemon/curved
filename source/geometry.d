@@ -1,6 +1,7 @@
 import std.math, std.array, std.format;
 import img, symbolic, dlangui.graphics.drawbuf;
-import std.algorithm : canFind, map;
+import std.algorithm : canFind, map, sum;
+import std.range : iota;
 
 __gshared uint[] wallTexture;
 __gshared ColorDrawBuf worldMap;
@@ -318,11 +319,33 @@ class Params {
     double heading, dt, range;
     UV pos;
     bool dyndt, walls;
+    int rotAlpha, rotBeta; // rotation angles in degrees
+}
+
+double[3][3] rotMatrix(Params ps) {
+    double alpha = ps.rotAlpha * PI / 180, beta = ps.rotBeta * PI / 180;
+    double[3][3] rot1, rot2, rot;
+    foreach(i; 0..3)
+        foreach(j; 0..3)
+            rot1[i][j] = rot2[i][j] = i==j ? 1.0 : 0.0;
+    rot1[0][0] = cos(alpha); // xz rotation around y
+    rot1[0][2] = -sin(alpha);
+    rot1[2][0] = sin(alpha);
+    rot1[2][2] = cos(alpha);
+    rot2[1][1] = cos(beta); //yz rotation around x
+    rot2[1][2] = -sin(beta);
+    rot2[2][1] = sin(beta);
+    rot2[2][2] = cos(beta);
+
+    foreach(i;0..3)
+        foreach(j;0..3)
+            rot[i][j] = iota(3).map!(k => rot1[i][k] * rot2[k][j]).sum;
+    return rot;
 }
 
 class Renderer {
-    abstract void drawSurface(ImageZ img);
-    abstract void drawPoints(ImageZ img, UV[] points);
+    abstract void drawSurface(ImageZ img, Params ps);
+    abstract void drawPoints(ImageZ img, UV[] points, Params ps);
     abstract UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0);
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
     abstract string name();
@@ -333,7 +356,7 @@ class Render(World) : Renderer {
 
     override string name() { return World.name; }
 
-    override void drawSurface(ImageZ img) {
+    override void drawSurface(ImageZ img, Params ps) {
         enum NU = 1500, NV = 700; // number of mesh points
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
@@ -343,12 +366,17 @@ class Render(World) : Renderer {
         else
             const double vk = 1.0;
         img.clear();
+        double[3][3] rot = rotMatrix(ps);
+
         foreach(iv; 1..NV-1) {
             double v = cast(double)(iv - NV/2) * vk * PI / NV;
             foreach(iu; 0.. NU) {
                 double u = cast(double)iu * 2.0*PI / NU;
-                double x,y,z;
-                Surf.embedIn3D(u,v, x,y,z);
+                double x0,y0,z0;
+                Surf.embedIn3D(u,v, x0,y0,z0);
+                double x = rot[0][0]*x0 + rot[0][1]*y0 + rot[0][2]*z0;
+                double y = rot[1][0]*x0 + rot[1][1]*y0 + rot[1][2]*z0;
+                double z = rot[2][0]*x0 + rot[2][1]*y0 + rot[2][2]*z0;
 
                 // project on 'screen' plane
                 double z1 = zCenter + z;
@@ -371,12 +399,16 @@ class Render(World) : Renderer {
             if (im is null) im = new ImageZ(w,h);
     }
 
-    override void drawPoints(ImageZ img, UV[] points) {
+    override void drawPoints(ImageZ img, UV[] points, Params ps) {
         const W2 = img.W / 2, H2 = img.H / 2;
         const double zCenter = globalR * World.distance, zScreen = img.W / 1.2;
+        double[3][3] rot = rotMatrix(ps);
         foreach(p; points) {
-            double x,y,z;
-            Surf.embedIn3D(p.u, p.v, x,y,z);
+            double x0,y0,z0;
+            Surf.embedIn3D(p.u, p.v, x0,y0,z0);
+            double x = rot[0][0]*x0 + rot[0][1]*y0 + rot[0][2]*z0;
+            double y = rot[1][0]*x0 + rot[1][1]*y0 + rot[1][2]*z0;
+            double z = rot[2][0]*x0 + rot[2][1]*y0 + rot[2][2]*z0;
             double z1 = zCenter + z;
             double k = zScreen / z1;
             double px = x * k, py = y * k;

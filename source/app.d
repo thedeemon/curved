@@ -135,8 +135,10 @@ extern (C) int UIAppMain(string[] args) {
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
+    ps.rotAlpha = 0; ps.rotBeta = 0;
     Renderer rend = worlds[0];// thingyEq;
-    rend.drawSurface(imgSphere);
+    rend.drawSurface(imgSphere, ps);
+    UV[] points;
 
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
@@ -150,11 +152,19 @@ extern (C) int UIAppMain(string[] args) {
         auto r = edR.text.to!double;
         if (r >= 100 && r <= 1000000) globalR = r;
         img.copyFrom(imgSphere);
-        auto points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
-        rend.drawPoints(img, points);
+        points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
+        rend.drawPoints(img, points, ps);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, 512,512);
         txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
+    }
+
+    void rerender3DView() {
+        rend.drawSurface(imgSphere, ps);
+        img.copyFrom(imgSphere);
+        rend.drawPoints(img, points, ps);
+        pic.drawImgAt(img, 0,0, 100,100, 320,320);
+        window.invalidate();
     }
 
     window.mainWidget.childById!Button("btnRender").click = delegate(Widget w) {
@@ -164,7 +174,7 @@ extern (C) int UIAppMain(string[] args) {
 
     worldCombo.itemClick = delegate(Widget wgt, int idx) {
         rend = worlds[idx];
-        rend.drawSurface(imgSphere);
+        rend.drawSurface(imgSphere, ps);
         render();
         return true;
     };
@@ -189,6 +199,10 @@ extern (C) int UIAppMain(string[] args) {
                     while(ps.heading >= 360) ps.heading -= 360;
                     edHeading.text = format("%.3g"d, ps.heading);
                     break;
+                case KeyCode.KEY_L: ps.rotAlpha = (ps.rotAlpha + 350) % 360; rerender3DView(); return true;
+                case KeyCode.KEY_J: ps.rotAlpha = (ps.rotAlpha + 10) % 360;  rerender3DView(); return true;
+                case KeyCode.KEY_I: ps.rotBeta = (ps.rotBeta + 350) % 360;   rerender3DView(); return true;
+                case KeyCode.KEY_K: ps.rotBeta = (ps.rotBeta + 10) % 360;    rerender3DView(); return true;
                 default: return false;
             }
             render();
