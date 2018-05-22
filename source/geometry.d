@@ -118,39 +118,40 @@ uint earthColor(double u, double v) {
 }
 
 uint synthColor(double u, double v) {
-        int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
-        if (iu >= 360) {
-            do iu -= 360; while (iu >= 360);
-        } else if (iu < 0) {
-            do iu += 360; while (iu < 0);
-        }
-        if (iv >= 180) {
-            do iv -= 360; while (iv >= 180);
-        } else if (iv < -180) {
-            do iv += 360; while (iv < -180);
-        }
+    int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+    if (iu >= 360) {
+        do iu -= 360; while (iu >= 360);
+    } else if (iu < 0) {
+        do iu += 360; while (iu < 0);
+    }
+    if (iv >= 180) {
+        do iv -= 360; while (iv >= 180);
+    } else if (iv < -180) {
+        do iv += 360; while (iv < -180);
+    }
 
-        if (iv >= 90) {
-            iv = 180 - iv;
-        } else if (iv < -90) {
-            iv = -180 - iv;
-        }
-        // iu: 0..360,  iv: -90..90
+    if (iv >= 90) {
+        iv = 180 - iv;
+    } else if (iv < -90) {
+        iv = -180 - iv;
+    }
+    // iu: 0..360,  iv: -90..90
 
+    uint clr;
+    int mu = iu % 20, mv = (iv + 180) % 20;
+    if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
+        clr = wallColor; //squares
+    else {
         int c = ((iu ^ iv) & 31)*4 + 64;
-        uint clr = (c << 16) + (c<<8) + c;
-        int mu = iu % 20, mv = (iv + 180) % 20;
-        if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
-            clr = wallColor; //squares
-        else {
-            if (mv >= 13 && mv < 16 && mu >= 3 && mu < 6)
-                clr = (iu/3 * 2)<<16;
-            else
-            if (mv >= 3 && mv < 6 && mu >= 13 && mu < 16)
-                clr = ((iv + 90)/3 * 4)<<8;
-        }
-        return clr;
+        uint rmask = iu >= 180 ? 255 : 127;
+        uint gmask = ((iu / 90) & 1) ? 255 : 127;
+        uint bmask = iv >= 0 ? 255 : 127;
+        clr = ((c & rmask) << 16) + ((c & gmask)<<8) + (c & bmask);
+    }
+    return clr;
 }
+
+
 
 class Surface(alias surfaceEquation) {
     enum codes = genCode!surfaceEquation();
@@ -283,8 +284,35 @@ struct Donut {
     static string name = "Donut";
     alias equation = torusEq;
     static double distance = 9.0;
-    alias color = synthColor;
-}
+
+    static uint color(double u, double v) { // u: 0 .. 2Pi,   v: -Pi .. Pi
+        int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
+        if (iu >= 360) {
+            do iu -= 360; while (iu >= 360);
+        } else if (iu < 0) {
+            do iu += 360; while (iu < 0);
+        }
+        if (iv >= 360) {
+            do iv -= 360; while (iv >= 360);
+        } else if (iv < 0) {
+            do iv += 360; while (iv < 0);
+        }
+
+        // iu: 0..360,  iv: 0..360
+        uint clr;
+        int mu = iu % 20, mv = (iv + 180) % 20;
+        if (mu >= 10 && mv >= 10 && mu < 16 && mv < 16)
+            clr = wallColor; //squares
+        else {
+            int c = ((iu ^ iv) & 31)*4 + 64;
+            uint rmask = iu >= 180 ? 255 : 127;
+            uint gmask = ((iu / 90) & 1) ? 255 : 127;
+            uint bmask = iv >= 180 ? 255 : 127;
+            clr = ((c & rmask) << 16) + ((c & gmask)<<8) + (c & bmask);
+        }
+        return clr;
+    }
+}//Donut
 
 class Params {
     double heading, dt, range;
