@@ -1,17 +1,18 @@
 import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format, std.meta;
 import symbolic, img, geometry;
 mixin APP_ENTRY_POINT;
+enum VX = 854 - 320;
 
 class DrawingBoard : ImageWidget {
 	ColorDrawBuf cdbuf;
-    int W = 850, H = 600; //current size
+    int W = 854, H = 480;
 
 	this() {
 		cdbuf = new ColorDrawBuf(W, H);
 		Ref!DrawBuf r = cdbuf;
 		this.drawable = new ImageDrawable(r);
 		this.margins = 0;// Rect(0, 10, 0, 10);//10
-        fillBytes(0xc0c0c0);
+        fillBytes(0);
         initWall();
 	}
 
@@ -32,15 +33,6 @@ class DrawingBoard : ImageWidget {
 				ptr[x] = q;// ((x + q) ^ y) & 255;
 		}
 	}
-
-    void drawImgZ(ImageZ img) {
-        auto w = img.W;
-        foreach(y; 0..img.H) {
-            uint* ptr = cdbuf.scanLine(y);
-            ptr[0..w] = img.colors[y*w .. y*w+w];
-        }
-        invalidate();
-    }
 
     void drawImgAt(ImageZ img, int dx, int dy, int sx, int sy, int szx, int szy) {
         assert(dx >= 0 && dy >= 0 && dx + szx <= W && dy + szy <= H);
@@ -83,6 +75,7 @@ mixin(registerWidgets!("__gshared static this", DrawingBoard));
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
     int w= 880, h = 700;
+
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
     // foreach(s; genCode!(Wormhole.equation)) writeln(s);
@@ -133,7 +126,7 @@ extern (C) int UIAppMain(string[] args) {
     worldCombo.items = worlds.amap!(w => w.name.to!dstring);
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
-    auto imgFloor = new ImageZ(512,512);
+    auto imgFloor = new ImageZ(VX, 480);
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.1;
@@ -159,7 +152,7 @@ extern (C) int UIAppMain(string[] args) {
         points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
         rend.drawPoints(img, points, ps);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
-        pic.drawImgAt(imgFloor, 320,0, 0,0, 512,512);
+        pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
         txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
 

@@ -1,6 +1,6 @@
-import std.math, std.array, std.format;
+import std.math, std.array, std.format, std.stdio;
 import img, symbolic, dlangui.graphics.drawbuf;
-import std.algorithm : canFind, map, sum;
+import std.algorithm : canFind, map, sum, min;
 import std.range : iota;
 
 __gshared uint[] wallTexture;
@@ -478,6 +478,7 @@ class Render(World) : Renderer {
 
                 // project on 'screen' plane
                 double z1 = zCenter + z;
+                if (z1 < zScreen) continue;
                 double k = zScreen / z1;
                 double px = x * k, py = y * k;
 
@@ -502,32 +503,32 @@ class Render(World) : Renderer {
         const double zCenter = globalR * globalDistance, zScreen = img.W / 1.2;
         double[3][3] rot = rotMatrix(ps);
 
-        void toScr(UV p, ref int sx, ref int sy, ref double z) {
+        bool toScr(UV p, ref int sx, ref int sy, ref double z) {
             double x0,y0,z0;
             Surf.embedIn3D(p.u, p.v, x0,y0,z0);
             double x = rot[0][0]*x0 + rot[0][1]*y0 + rot[0][2]*z0;
             double y = rot[1][0]*x0 + rot[1][1]*y0 + rot[1][2]*z0;
                    z = rot[2][0]*x0 + rot[2][1]*y0 + rot[2][2]*z0;
             double z1 = zCenter + z;
+            if (z1 < zScreen) return false;
             double k = zScreen / z1;
             double px = x * k, py = y * k;
             sx = W2 + cast(int)(px);
             sy = H2 - cast(int)(py);
+            return true;
         }
         int sx, sy;
         double z;
-        toScr(ps.pos, sx, sy, z);
-        foreach(dy; -1..2) // draw our position
-            foreach(dx; -1..2)
-                img.putPixel(sx+dx, sy+dy, 0xFFFFFF);
+        if (toScr(ps.pos, sx, sy, z))
+            foreach(dy; -1..2) // draw our position
+                foreach(dx; -1..2)
+                    img.putPixel(sx+dx, sy+dy, 0xFFFFFF);
 
         foreach(p; points) {
-            toScr(p, sx, sy, z);
+            if (!toScr(p, sx, sy, z)) continue;
             uint clr =  (128 + cast(int)(World.pointColor(z) * 120)) << 16;
             img.putPixel(sx, sy, clr);
         }
-
-
     }
 
     int[] whoseCol;
@@ -536,29 +537,28 @@ class Render(World) : Renderer {
         import std.range : iota;
         import std.parallelism;
         const int W = img.W, H = img.H;
-        double screenZ = W / 1.2, camY = H/2;
+        const double screenZ = W / 1.2, camY = H*5/8;
+        const int SkyH = H*3/8, FloorH = H*5/8;
         auto paths = appender!(UV[]);
         const bool dyndt = ps.dyndt, walls = ps.walls;
-        const int minsy = cast(int)(H/2 / ps.range);
+        const int minsy = cast(int)(FloorH / ps.range);
         ensureImagesCreated(taskPool.size + 1, W, H);
 
         if (walls) {
             foreach(im; wrkImages[].parallel)
-                im.fillRows(0, H/2+minsy, 0x505090);
+                im.fillRows(0, SkyH + minsy, 0x505090);
         } else
-            img.fillRows(0, H/2+minsy, 0x505090);
-        //writeln("totalCPUs: ", totalCPUs, " poolSize: ", taskPool.size);
+            img.fillRows(0, SkyH + minsy, 0x505090);
 
         auto pathApps = iota(taskPool.size + 1).amap!(i => appender!(UV[]));
         whoseCol.length = W;
 
         foreach(sx; iota(-W/2, W/2).parallel) {
             auto idx = taskPool.workerIndex;
-            //writeln("idx=", idx);
             whoseCol[sx+W/2] = cast(int)idx;
             double dt = ps.dt;
             double angle = atan(sx / screenZ) + ps.heading*PI/180;
-            double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
+            const double scrDistAlongRay = sqrt(sx*sx + screenZ*screenZ);
             double s = 0, du,dv;
             Surf.courseVector(u0, v0, angle, du, dv);
 
@@ -568,7 +568,7 @@ class Render(World) : Renderer {
             state.data[2] = v0;
             state.data[3] = dv;
 
-            int sy = H/2, iters = 0;
+            int sy = FloorH, iters = 0;
             double nextDist = scrDistAlongRay;
             while(sy > minsy && iters < 10000) {
                 const double u = state.data[0], v = state.data[2];
@@ -577,13 +577,16 @@ class Render(World) : Renderer {
                     auto clr = World.color(u, v);
                     if (clr == wallColor) {
                         int totalh = cast(int) (H * scrDistAlongRay / s);
-                        int h = totalh <= H-2 ? totalh : H-2;
-                        int y0 = H/2-1-h/2;
+                        int h = min(totalh, H);
+                        int y0 = SkyH - h*3/8; //max(SkyH - h/2, 0);
+                        assert(y0 >= 0);
                         int tx = cast(int)((u*cos(v) + v)*500) & 127;
                         double ky = 128.0 / totalh;
-                        double ty0 = h==totalh ? 0 :  (totalh-h)/2 * ky;
+                        double ty0 = h==totalh ? 0 :  (totalh*3/8 - SkyH) * ky;
                         foreach(i; 0..h) {
                             int ty = cast(int) (ky*i + ty0);
+                            assert(ty >= 0);
+                            assert(ty < 128);
                             clr = wallTexture[tx*128 + ty];
                             wrkImages[idx].putPixel(sx + W/2, y0 + i, clr);
                         }
@@ -594,7 +597,7 @@ class Render(World) : Renderer {
 
                 if (s >= nextDist) {
                     auto clr = World.color(u, v);
-                    wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, clr);
+                    wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
                     if ((sx & 63)==0) pathApps[idx] ~= UV(u,v);
@@ -606,12 +609,12 @@ class Render(World) : Renderer {
                 iters++;
             }
             while(sy > minsy) { // not full vertical line is drawn yet
-                wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, 0);
+                wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, 0);
                 sy--;
             }
         }// for sx
 
-        int y0 = walls ? 0 : H/2+minsy;
+        int y0 = walls ? 0 : SkyH+minsy;
         foreach(sx; 0..W) {
             auto idx = whoseCol[sx];
             foreach(y; y0 .. H) {
