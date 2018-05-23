@@ -372,6 +372,35 @@ double F(double r) {  return 2.0 * sqrt(r - 1.0); }
 double dF2(double r) { return 1.0 / (r-1.0); }
 double GC111(double r) { return 0.5 / (r*(1.0-r)); }
 
+struct Wormhole {
+    static string name = "Wormhole";
+    static Expr[] equation() {
+        auto R = new Var("R");
+        auto v = new Var("v");
+        auto r = mul(add(mul(v, v), new Const("1")),  R);
+        return [mul(r, new Cos("u")),
+                mul(r, new Sin("u")),
+                mul(v, R)];
+    }
+    static const int NV = 1200;
+    static double pickV(int iv) {
+        return (iv - NV/2) * 10.0 / NV;  // -5..5
+    }
+    static double distance = 12.0;
+    static uint color(double u, double v) { // u: 0 .. 2Pi,   v: -5..5
+        const double R = globalR;
+        auto r = (1 + v*v)*R;
+        int x = cast(int) (r*cos(u))/10;
+        int z = cast(int) (r*sin(u))/10;
+        int c = ((x ^ z) & 31)*4 + 64;
+        uint rmask = x > 0 ? 255 : 127;
+        uint gmask = z > 0 ? 255 : 127;
+        uint bmask = v > 0 ? 255 : 127;
+        return ((c & rmask) << 16) + ((c & gmask)<<8) + (c & bmask);
+    }
+    static double pointColor(double z) { return 1.0; }
+}
+
 class Params {
     double heading, dt, range;
     UV pos;
@@ -558,6 +587,7 @@ class Render(World) : Renderer {
                             clr = wallTexture[tx*128 + ty];
                             wrkImages[idx].putPixel(sx + W/2, y0 + i, clr);
                         }
+                        sy = minsy;
                         break;
                     }
                 }

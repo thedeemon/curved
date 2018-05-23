@@ -85,7 +85,7 @@ extern (C) int UIAppMain(string[] args) {
     int w= 880, h = 700;
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
-    // foreach(s; genCode!(Gravity.equation)) writeln(s);
+    // foreach(s; genCode!(Wormhole.equation)) writeln(s);
     // return 0;
 
     version(Windows) {
@@ -127,7 +127,7 @@ extern (C) int UIAppMain(string[] args) {
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
 
     Renderer[] worlds;
-    foreach(Wld; AliasSeq!(Earth, Sphere, FatBall, Donut, BlackHole))
+    foreach(Wld; AliasSeq!(Earth, Sphere, FatBall, Donut, BlackHole, Wormhole))
         worlds ~= new Render!Wld;
 
     worldCombo.items = worlds.amap!(w => w.name.to!dstring);
@@ -136,7 +136,7 @@ extern (C) int UIAppMain(string[] args) {
     auto imgFloor = new ImageZ(512,512);
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
-    ps.pos.u = 4.7; ps.pos.v = 0.2;
+    ps.pos.u = 4.7; ps.pos.v = 0.1;
     ps.range = 6.0;
     ps.rotAlpha = 0; ps.rotBeta = 0;
     Renderer rend = worlds[0];
