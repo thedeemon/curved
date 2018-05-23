@@ -127,7 +127,7 @@ extern (C) int UIAppMain(string[] args) {
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
 
     Renderer[] worlds;
-    foreach(Wld; AliasSeq!(Sphere, Earth, FatBall, Donut, BlackHole))
+    foreach(Wld; AliasSeq!(Earth, Sphere, FatBall, Donut, BlackHole))
         worlds ~= new Render!Wld;
 
     worldCombo.items = worlds.amap!(w => w.name.to!dstring);

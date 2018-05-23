@@ -472,21 +472,33 @@ class Render(World) : Renderer {
         const W2 = img.W / 2, H2 = img.H / 2;
         const double zCenter = globalR * globalDistance, zScreen = img.W / 1.2;
         double[3][3] rot = rotMatrix(ps);
-        foreach(p; points) {
+
+        void toScr(UV p, ref int sx, ref int sy, ref double z) {
             double x0,y0,z0;
             Surf.embedIn3D(p.u, p.v, x0,y0,z0);
             double x = rot[0][0]*x0 + rot[0][1]*y0 + rot[0][2]*z0;
             double y = rot[1][0]*x0 + rot[1][1]*y0 + rot[1][2]*z0;
-            double z = rot[2][0]*x0 + rot[2][1]*y0 + rot[2][2]*z0;
+                   z = rot[2][0]*x0 + rot[2][1]*y0 + rot[2][2]*z0;
             double z1 = zCenter + z;
             double k = zScreen / z1;
             double px = x * k, py = y * k;
+            sx = W2 + cast(int)(px);
+            sy = H2 - cast(int)(py);
+        }
+        int sx, sy;
+        double z;
+        toScr(ps.pos, sx, sy, z);
+        foreach(dy; -1..2) // draw our position
+            foreach(dx; -1..2)
+                img.putPixel(sx+dx, sy+dy, 0xFFFFFF);
 
+        foreach(p; points) {
+            toScr(p, sx, sy, z);
             uint clr =  (128 + cast(int)(World.pointColor(z) * 120)) << 16;
-            int sx = W2 + cast(int)(px);
-            int sy = H2 - cast(int)(py);
             img.putPixel(sx, sy, clr);
         }
+
+
     }
 
     int[] whoseCol;
