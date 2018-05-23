@@ -27,7 +27,7 @@ class Var : Expr {
     }
 }
 
-class Sin : Expr { 
+class Sin : Expr {
     Expr arg;
     this(string v) { arg = new Var(v); }
     this(Expr x) { arg = x; }
@@ -46,6 +46,17 @@ class Cos : Expr {
     override string code() { return "cos_"~ arg.code; }
     override Expr diff(string dx) {
         return mul(neg(new Sin(arg)), arg.diff(dx));
+    }
+}
+
+class Fv : Expr { // opaque function: F(v) or dF(v) or ddF(v) ...
+    string ddd;
+    this() { ddd=""; }
+    this(string d) { ddd=d; }
+    override string toString() { return ddd~"F(v)"; }
+    override string code() { return toString(); }
+    override Expr diff(string dx) {
+        return dx=="v" ? new Fv("d" ~ ddd) : zero;
     }
 }
 
@@ -292,7 +303,7 @@ Expr tryFactoring(Expr[] summands, ref bool ok) {
         }
 
     if (candidates.length == 0) {
-        ok = false; 
+        ok = false;
         return new Add(summands); // nothing found
     }
     ok = true;
@@ -360,5 +371,7 @@ Expr[] diff(Expr[] vec, string dx) { return vec.amap!(e => e.diff(dx)); }
 Expr dot(Expr[] a, Expr[] b) { return iota(a.length).amap!(i => mul(a[i], b[i])).add; }
 
 string txtSimp(string s) {
-    return s.replace("sqrt(R * R)","R").replace("sqrt(1)", "1");
+    return s.replace("sqrt(R * R)","R").replace("sqrt(1)", "1")
+        .replace("dF(v) * dF(v)", "dF2(v)")
+        .replace("(dF(v) * ddF(v)) / ((1 + dF2(v)))", "GC111(v)");
 }

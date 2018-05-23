@@ -85,6 +85,9 @@ extern (C) int UIAppMain(string[] args) {
     int w= 880, h = 700;
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
+    // foreach(s; genCode!(Gravity.equation)) writeln(s);
+    // return 0;
+
     version(Windows) {
         w = w.pixelsToPoints; h = h.pixelsToPoints;
     }
@@ -124,7 +127,7 @@ extern (C) int UIAppMain(string[] args) {
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
 
     Renderer[] worlds;
-    foreach(Wld; AliasSeq!(Sphere, Earth, FatBall, Donut))
+    foreach(Wld; AliasSeq!(Sphere, Earth, FatBall, Donut, BlackHole))
         worlds ~= new Render!Wld;
 
     worldCombo.items = worlds.amap!(w => w.name.to!dstring);
@@ -136,7 +139,8 @@ extern (C) int UIAppMain(string[] args) {
     ps.pos.u = 4.7; ps.pos.v = 0.2;
     ps.range = 6.0;
     ps.rotAlpha = 0; ps.rotBeta = 0;
-    Renderer rend = worlds[0];// thingyEq;
+    Renderer rend = worlds[0];
+    rend.setDistance();
     rend.drawSurface(imgSphere, ps);
     UV[] points;
 
@@ -174,6 +178,8 @@ extern (C) int UIAppMain(string[] args) {
 
     worldCombo.itemClick = delegate(Widget wgt, int idx) {
         rend = worlds[idx];
+        rend.setDistance();
+        rend.ensureCorrectPos(ps);
         rend.drawSurface(imgSphere, ps);
         render();
         return true;
@@ -203,6 +209,8 @@ extern (C) int UIAppMain(string[] args) {
                 case KeyCode.KEY_J: ps.rotAlpha = (ps.rotAlpha + 10) % 360;  rerender3DView(); return true;
                 case KeyCode.KEY_I: ps.rotBeta = (ps.rotBeta + 350) % 360;   rerender3DView(); return true;
                 case KeyCode.KEY_K: ps.rotBeta = (ps.rotBeta + 10) % 360;    rerender3DView(); return true;
+                case KeyCode.KEY_U: globalDistance += 0.5; rerender3DView(); return true;
+                case KeyCode.KEY_O: globalDistance -= 0.5; rerender3DView(); return true;
                 default: return false;
             }
             render();

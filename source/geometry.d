@@ -35,7 +35,7 @@ struct Vec(T, int N) {
 
 alias Dbl4 = Vec!(double, 4);
 enum wallColor = 0xF08000;
-__gshared double globalR = 1000.0;
+__gshared double globalR = 1000.0, globalDistance = 3.0;
 
 string[] genCode(alias surfaceEquation)() {
     Expr[] X = surfaceEquation();
@@ -187,10 +187,10 @@ class Surface(alias surfaceEquation) {
         mixin(codes[2]);
     }
 
-    static void courseVector(double u0, double v0, double angle, ref double du, ref double dv) {
+    static void courseVector(double u, double v, double angle, ref double du, ref double dv) {
         const double R = globalR;
-        double cos_v = cos(v0), sin_v = sin(v0);
-        double cos_u = cos(u0), sin_u = sin(u0);
+        double cos_v = cos(v), sin_v = sin(v);
+        double cos_u = cos(u), sin_u = sin(u);
         if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
         enum u_code = format("du = sin(angle) / sqrt(%s);", codes[3]).txtSimp;
         enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[5]).txtSimp;
@@ -201,20 +201,20 @@ class Surface(alias surfaceEquation) {
         //du = sin(angle)/(cos_v*R); dv = cos(angle)/R;
     }
 
-    static double courseAngle(double u0, double v0, double du, double dv) { // in radians
+    static double courseAngle(double u, double v, double du, double dv) { // in radians
         // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
         const double R = globalR;
-        const double cos_v = cos(v0), sin_v = sin(v0);
-        const double sin_u = sin(u0), cos_u = cos(u0);
+        const double cos_v = cos(v), sin_v = sin(v);
+        const double sin_u = sin(u), cos_u = cos(u);
         enum up_v_code = format("double up_v = 1/sqrt(%s);", codes[5]).txtSimp;
         enum product_code = format("double product = %s * up_v * du + %s * up_v * dv;", codes[4], codes[5]).txtSimp;
         pragma(msg, up_v_code);
         pragma(msg, product_code);
         mixin(up_v_code);
         mixin(product_code);
-        double a = acos(product / vlen(u0, v0, du, dv));
+        double a = acos(product / vlen(u, v, du, dv));
         if (du < 0) a = 2*PI - a;
         return a;
     }
@@ -253,11 +253,14 @@ Expr[] torusEq() {
             mul(neg(R), new Sin("v")) ];
 }
 
+double ballPointColor(double z) { return -z/globalR; }
+
 struct Sphere {
     static string name = "Ball";
     alias equation = sphereEq;
     static double distance = 3.0;
     alias color = synthColor;
+    alias pointColor = ballPointColor;
 }
 
 struct Earth {
@@ -265,6 +268,7 @@ struct Earth {
     alias equation = sphereEq;
     static double distance = 3.0;
     alias color = earthColor;
+    alias pointColor = ballPointColor;
 }
 
 struct Plane {
@@ -279,12 +283,17 @@ struct FatBall {
     alias equation = ellipsoidEq;
     static double distance = 3.0;
     alias color = synthColor;
+    alias pointColor = ballPointColor;
 }
 
 struct Donut {
     static string name = "Donut";
     alias equation = torusEq;
     static double distance = 9.0;
+    static const int NV = 700;
+    static double pickV(int iv) {
+        return (iv - NV/2) * PI / NV;
+    }
 
     static uint color(double u, double v) { // u: 0 .. 2Pi,   v: -Pi .. Pi
         int iu = cast(int)(u/PI*180), iv = cast(int)(v/PI*180);
@@ -313,7 +322,55 @@ struct Donut {
         }
         return clr;
     }
+
+    static double pointColor(double z) { return -z/(globalR*3.0); }
 }//Donut
+
+struct BlackHole {
+    static string name = "Black hole";
+    static Expr[] equation() {
+        auto R = new Var("R");
+        auto r = mul(new Var("v"), R);
+        return [mul(r, new Cos("u")),
+                mul(R, new Fv()),
+                mul(r, neg(new Sin("u"))) ];
+
+    }
+    static const int NV = 700;
+    static double pickV(int iv) {
+        return 1.0 + iv * 8.0 / NV;  // 1..9
+    }
+    static double distance = 12.0;
+    static uint color(double u, double v) { // u: 0 .. 2Pi,   v: 1..9
+        const double R = globalR;
+        int x = cast(int) (v*cos(u)*R)/10;
+        int z = cast(int) (-v*sin(u)*R)/10;
+        int c = ((x ^ z) & 31)*4 + 64;
+        uint rmask = x > 0 ? 255 : 127;
+        uint gmask = z > 0 ? 255 : 127;
+        uint bmask = ((x/64 + z/64)&1) ? 255 : 127;
+        return ((c & rmask) << 16) + ((c & gmask)<<8) + (c & bmask);
+    }
+    static double pointColor(double z) { return 1.0; }
+    static void ensureCorrectPos(Params ps) {
+        if (ps.pos.v < 4.0) ps.pos.v = 4.0;
+    }
+}
+
+// In polar coordinates where u is angle and v is radius and height is F(v)
+// metric is ds^2 = (1 + dF2(v)) * dv^2 + v^2 * du^2
+// while Schwarzschild metric, just the space part, is
+// ds^2 = (1 + R/(r-R)) * dr^2 + r^2 * du^2
+// where R is Schwarzschild radius
+// so dF2(r) = R/(r-R)
+// dF(r) = sqrt(R/(r-R))
+// F(r) = 2*sqrt(R*(r-R))
+// dF(r) * ddF = -R / (2*(R-r)**2)
+// C_111 = dF * ddF / (1 + dF*dF) = R / (2*r*(R-r))
+// here R = 1
+double F(double r) {  return 2.0 * sqrt(r - 1.0); }
+double dF2(double r) { return 1.0 / (r-1.0); }
+double GC111(double r) { return 0.5 / (r*(1.0-r)); }
 
 class Params {
     double heading, dt, range;
@@ -343,33 +400,45 @@ double[3][3] rotMatrix(Params ps) {
     return rot;
 }
 
+auto getOr(T, string mbr, V)(V def) {
+    static if (__traits(hasMember, T, mbr)) return __traits(getMember, T, mbr);
+    else return def;
+}
+
 class Renderer {
     abstract void drawSurface(ImageZ img, Params ps);
     abstract void drawPoints(ImageZ img, UV[] points, Params ps);
     abstract UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0);
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
     abstract string name();
+    abstract void setDistance();
+    abstract void ensureCorrectPos(Params ps);
 }
 
 class Render(World) : Renderer {
     alias Surf = Surface!(World.equation);
 
     override string name() { return World.name; }
-
+    override void setDistance() { globalDistance = World.distance; }
+    override void ensureCorrectPos(Params ps) {
+        static if (__traits(hasMember, World, "ensureCorrectPos"))
+            World.ensureCorrectPos(ps);
+    }
     override void drawSurface(ImageZ img, Params ps) {
-        enum NU = 1500, NV = 700; // number of mesh points
+        enum NU = getOr!(World, "NU")(1500);
+        enum NV = getOr!(World, "NV")(700); // number of mesh points
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
-        const double zCenter = R * World.distance, zScreen = img.W / 1.2;
-        static if (is(World==Donut))
-            const double vk = 2.0;
-        else
-            const double vk = 1.0;
+        const double zCenter = R * globalDistance, zScreen = img.W / 1.2;
         img.clear();
         double[3][3] rot = rotMatrix(ps);
 
         foreach(iv; 1..NV-1) {
-            double v = cast(double)(iv - NV/2) * vk * PI / NV;
+            static if (__traits(hasMember, World, "pickV"))
+            double v = World.pickV(iv);
+            else
+            double v = (iv - NV/2) * PI / NV;
+
             foreach(iu; 0.. NU) {
                 double u = cast(double)iu * 2.0*PI / NU;
                 double x0,y0,z0;
@@ -401,7 +470,7 @@ class Render(World) : Renderer {
 
     override void drawPoints(ImageZ img, UV[] points, Params ps) {
         const W2 = img.W / 2, H2 = img.H / 2;
-        const double zCenter = globalR * World.distance, zScreen = img.W / 1.2;
+        const double zCenter = globalR * globalDistance, zScreen = img.W / 1.2;
         double[3][3] rot = rotMatrix(ps);
         foreach(p; points) {
             double x0,y0,z0;
@@ -412,7 +481,8 @@ class Render(World) : Renderer {
             double z1 = zCenter + z;
             double k = zScreen / z1;
             double px = x * k, py = y * k;
-            uint clr = (128 - cast(int)(z/globalR * 100)) << 16;
+
+            uint clr =  (128 + cast(int)(World.pointColor(z) * 120)) << 16;
             int sx = W2 + cast(int)(px);
             int sy = H2 - cast(int)(py);
             img.putPixel(sx, sy, clr);
@@ -459,7 +529,7 @@ class Render(World) : Renderer {
 
             int sy = H/2, iters = 0;
             double nextDist = scrDistAlongRay;
-            while(sy > minsy && iters < 5000) {
+            while(sy > minsy && iters < 10000) {
                 const double u = state.data[0], v = state.data[2];
 
                 if (walls) {
@@ -492,6 +562,10 @@ class Render(World) : Renderer {
                 state = evolveRK!(Surf.geodesicStep)(state, dt);
                 s += ds;
                 iters++;
+            }
+            while(sy > minsy) { // not full vertical line is drawn yet
+                wrkImages[idx].putPixel(sx + W/2, sy + H/2-1, 0);
+                sy--;
             }
         }// for sx
 
