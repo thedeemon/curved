@@ -7,3 +7,10 @@ dependency "dlangui" version="~>0.9.177"
 subConfiguration "dlangui" "minimal"
 libs "gdi32" platform="windows"
 stringImportPaths "."
+targetType "executable"
+configuration "default" {
+
+}
+configuration "movie" {
+    versions "DirectorsCut"
+}

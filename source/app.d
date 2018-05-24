@@ -1,5 +1,6 @@
 import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format, std.meta;
 import symbolic, img, geometry;
+
 mixin APP_ENTRY_POINT;
 enum VX = 854 - 320;
 
@@ -68,6 +69,10 @@ class DrawingBoard : ImageWidget {
         enum mapData = cast(immutable ubyte[]) import("map.png");
         worldMap = loadImage(mapData, "map.png");
     }
+
+    version(DirectorsCut) {
+        void save(string fname) { saveBuf(fname, cdbuf); }
+    }
 }
 
 mixin(registerWidgets!("__gshared static this", DrawingBoard));
@@ -111,13 +116,42 @@ extern (C) int UIAppMain(string[] args) {
     });
 
     auto edHeading = window.mainWidget.childById!EditLine("heading");
-    // auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
     auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
     auto cbWalls = window.mainWidget.childById!CheckBox("walls");
     auto edRange = window.mainWidget.childById!EditLine("range");
     auto edR = window.mainWidget.childById!EditLine("R");
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
+    auto pic = window.mainWidget.childById!DrawingBoard("pic");
+
+    version(DirectorsCut) {
+        int shotN = 0, batchFrames = 0;
+        auto ui = parseML(q{
+            HorizontalLayout {
+                EditLine { text: "/home/dee/tmp/curved/one/"; id: "picdir"; layoutWidth: 400 }
+                Button { text: "Save"; id: "saveBtn"}
+                CheckBox { text: "action!"; id: "record" }
+            }
+        });
+        auto vl = cast(VerticalLayout) window.mainWidget;
+        auto edPath = ui.childById!EditLine("picdir");
+        auto cbRecord = ui.childById!CheckBox("record");
+        vl.addChild(ui);
+
+        void saveFrame() {
+            import std.file : exists, mkdir;
+            import std.path : buildPath;
+            auto path = edPath.text;
+            if (!exists(path))
+                mkdir(path);
+            pic.save( buildPath(path.to!string, format("%05d.png", shotN++)) );
+        }
+
+        ui.childById!Button("saveBtn").click = delegate(Widget w) {
+            saveFrame();
+            return true;
+        };
+    }
 
     Renderer[] worlds;
     foreach(Wld; AliasSeq!(Earth, Sphere, FatBall, Donut, BlackHole, Wormhole))
@@ -127,7 +161,7 @@ extern (C) int UIAppMain(string[] args) {
     auto imgSphere = new ImageZ(512,512);
     auto img = new ImageZ(512,512);
     auto imgFloor = new ImageZ(VX, 480);
-    auto pic = window.mainWidget.childById!DrawingBoard("pic");
+
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.1;
     ps.range = 8.0; ps.dt = 1;
@@ -141,7 +175,6 @@ extern (C) int UIAppMain(string[] args) {
         import std.datetime.stopwatch : StopWatch, AutoStart;
         auto sw = StopWatch(AutoStart.yes);
         ps.heading = edHeading.text.to!double;
-        // ps.dt = edDt.text.to!double;
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
         auto rng = edRange.text.to!double;
@@ -153,7 +186,10 @@ extern (C) int UIAppMain(string[] args) {
         rend.drawPoints(img, points, ps);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
-        txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
+        version(DirectorsCut)
+            txtOut.text = format("t=%s batch=%s"d, sw.peek.total!"msecs", batchFrames);
+        else
+            txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
 
     void rerender3DView() {
@@ -178,37 +214,62 @@ extern (C) int UIAppMain(string[] args) {
         return true;
     };
 
+    bool moveAndDraw(uint key, double k) {
+        switch(key) {
+            case KeyCode.KEY_A: ps.heading -= 10*k; edHeading.text = ps.heading.to!dstring; break;
+            case KeyCode.KEY_D: ps.heading += 10*k; edHeading.text = ps.heading.to!dstring; break;
+            case KeyCode.KEY_W:
+                auto hdn = ps.heading;
+                ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50 * k);
+                ps.heading = hdn;
+                edHeading.text = format("%.3g"d, hdn);
+                break;
+            case KeyCode.KEY_S:
+                auto hdn = ps.heading + 180;
+                ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50 * k);
+                ps.heading = hdn - 180;
+                while(ps.heading < 0) ps.heading += 360;
+                while(ps.heading >= 360) ps.heading -= 360;
+                edHeading.text = format("%.3g"d, ps.heading);
+                break;
+            case KeyCode.KEY_L: ps.rotAlpha = (ps.rotAlpha + 350) % 360; rerender3DView(); return true;
+            case KeyCode.KEY_J: ps.rotAlpha = (ps.rotAlpha + 10) % 360;  rerender3DView(); return true;
+            case KeyCode.KEY_I: ps.rotBeta = (ps.rotBeta + 350) % 360;   rerender3DView(); return true;
+            case KeyCode.KEY_K: ps.rotBeta = (ps.rotBeta + 10) % 360;    rerender3DView(); return true;
+            case KeyCode.KEY_U: globalDistance += 0.5*k; rerender3DView(); return true;
+            case KeyCode.KEY_O: globalDistance -= 0.5*k; rerender3DView(); return true;
+            default: return false;
+        }
+        render();
+        window.invalidate();
+        return true;
+    }
+
+    version(DirectorsCut) {
+        uint last_key;
+
+        void film() {
+            if (batchFrames <= 0) return;
+            moveAndDraw(last_key, 0.03);
+            saveFrame();
+            batchFrames--;
+            if (batchFrames > 0)
+                window.mainWidget.executeInUiThread({ film(); });
+        }
+    }
+
     window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
         //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
-            switch(e.keyCode) {
-                case KeyCode.KEY_A: ps.heading -= 10; edHeading.text = ps.heading.to!dstring; break;
-                case KeyCode.KEY_D: ps.heading += 10; edHeading.text = ps.heading.to!dstring; break;
-                case KeyCode.KEY_W:
-                    auto hdn = ps.heading;
-                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50);
-                    ps.heading = hdn;
-                    edHeading.text = format("%.3g"d, hdn);
-                    break;
-                case KeyCode.KEY_S:
-                    auto hdn = ps.heading + 180;
-                    ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50);
-                    ps.heading = hdn - 180;
-                    while(ps.heading < 0) ps.heading += 360;
-                    while(ps.heading >= 360) ps.heading -= 360;
-                    edHeading.text = format("%.3g"d, ps.heading);
-                    break;
-                case KeyCode.KEY_L: ps.rotAlpha = (ps.rotAlpha + 350) % 360; rerender3DView(); return true;
-                case KeyCode.KEY_J: ps.rotAlpha = (ps.rotAlpha + 10) % 360;  rerender3DView(); return true;
-                case KeyCode.KEY_I: ps.rotBeta = (ps.rotBeta + 350) % 360;   rerender3DView(); return true;
-                case KeyCode.KEY_K: ps.rotBeta = (ps.rotBeta + 10) % 360;    rerender3DView(); return true;
-                case KeyCode.KEY_U: globalDistance += 0.5; rerender3DView(); return true;
-                case KeyCode.KEY_O: globalDistance -= 0.5; rerender3DView(); return true;
-                default: return false;
+            version(DirectorsCut) {
+                if (cbRecord.checked) {
+                    batchFrames += 30;
+                    last_key = e.keyCode;
+                    window.mainWidget.executeInUiThread({ film(); });
+                    return true;
+                }
             }
-            render();
-            window.invalidate();
-            return true;
+            return moveAndDraw(e.keyCode, 1);
         }
         return false;
     };
