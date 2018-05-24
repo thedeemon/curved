@@ -35,6 +35,12 @@ class ImageZ {
         colors[i] = clr;
     }
 
+    void repeatPixel(int x, int y) {
+        if (x==0) return;
+        auto i = y*W + x;
+        colors[i] = colors[i-1];
+    }
+
     void clear() {
         colors[] = 0;
         depth[] = 1000000.0;

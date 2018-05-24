@@ -74,7 +74,7 @@ mixin(registerWidgets!("__gshared static this", DrawingBoard));
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
-    int w= 880, h = 700;
+    int w= 880, h = 600;
 
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
@@ -84,11 +84,10 @@ extern (C) int UIAppMain(string[] args) {
     version(Windows) {
         w = w.pixelsToPoints; h = h.pixelsToPoints;
     }
-    Window window = Platform.instance.createWindow("Curved", null, 1, w, h);
+    Window window = Platform.instance.createWindow("Curved spaces", null, 1, w, h);
     window.mainWidget = parseML(q{
         VerticalLayout {
             backgroundColor: 0xc0c0c0
-            // margins: 10pt
             padding: 10pt
             layoutWidth: 750
             HorizontalLayout {
@@ -96,22 +95,23 @@ extern (C) int UIAppMain(string[] args) {
                 ComboBox {id: "world"}
                 TextWidget {text: "Heading:" }
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
-                TextWidget {text: "dt:" }
-                EditLine { text: "1"; id: "dt"; layoutWidth: 50}
-                CheckBox { text: "Dyn.dt"; id: "dyndt"}
+                // TextWidget {text: "dt:" }
+                // EditLine { text: "1"; id: "dt"; layoutWidth: 50}
+                CheckBox { text: "Dyn. step"; id: "dyndt"}
                 CheckBox { text: "Walls"; id: "walls"}
                 TextWidget {text: "Range:" }
-                EditLine { text: "6"; id: "range"; layoutWidth: 70}
+                EditLine { text: "8"; id: "range"; layoutWidth: 70}
                 TextWidget {text: "R:" }
                 EditLine { text: "1000"; id: "R"; layoutWidth: 70}
                 TextWidget {text:""; id:"out"}
             }
             DrawingBoard {id: "pic"}
+            TextWidget { text: "WASD - move and turn, IJKL - rotate 3D view, U/O - zoom it." }
         }
     });
 
     auto edHeading = window.mainWidget.childById!EditLine("heading");
-    auto edDt = window.mainWidget.childById!EditLine("dt");
+    // auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
     auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
     auto cbWalls = window.mainWidget.childById!CheckBox("walls");
@@ -130,7 +130,7 @@ extern (C) int UIAppMain(string[] args) {
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
     auto ps = new Params();
     ps.pos.u = 4.7; ps.pos.v = 0.1;
-    ps.range = 6.0;
+    ps.range = 8.0; ps.dt = 1;
     ps.rotAlpha = 0; ps.rotBeta = 0;
     Renderer rend = worlds[0];
     rend.setDistance();
@@ -141,7 +141,7 @@ extern (C) int UIAppMain(string[] args) {
         import std.datetime.stopwatch : StopWatch, AutoStart;
         auto sw = StopWatch(AutoStart.yes);
         ps.heading = edHeading.text.to!double;
-        ps.dt = edDt.text.to!double;
+        // ps.dt = edDt.text.to!double;
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
         auto rng = edRange.text.to!double;
@@ -214,5 +214,6 @@ extern (C) int UIAppMain(string[] args) {
     };
 
     window.show();
+    render();
     return Platform.instance.enterMessageLoop();
 }

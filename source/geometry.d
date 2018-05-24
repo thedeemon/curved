@@ -64,7 +64,7 @@ string[] genCode(alias surfaceEquation)() {
                     auto J = g[l][i].diff(dx[j]);
                     auto I = g[l][j].diff(dx[i]);
                     auto L = neg(g[i][j].diff(dx[l]));
-                    tmp[l] = div( mul(ginv[k][l], new Add([J, I, L]).simp), two);
+                    tmp[l] = div( mul(ginv[k][l], add(J, I, L)), two);
                 }
                 C[k][i][j] = add(tmp[0], tmp[1]);
             }
@@ -100,21 +100,16 @@ uint earthColor(double u, double v) {
         do iu += 720; while (iu < 0);
     }
     if (iv >= 360) {
-        do iv -= 720; while (iv >= 360);
+        do iv -= 360; while (iv >= 360);
     } else if (iv < -360) {
         do iv += 360; while (iv < -360);
     }
-
     if (iv >= 180) {
         iv = 360 - iv;
-    } else if (iv < -180) {
-        iv = -360 - iv;
+    } else if (iv <= -180) {
+        iv = -359 - iv;
     }
     iv = 180 - iv;
-    assert(iu >= 0);
-    assert(iu < 720);
-    assert(iv >= 0);
-    assert(iv < 360);
     return worldMap.scanLine(iv)[iu];
 }
 
@@ -154,7 +149,7 @@ uint synthColor(double u, double v) {
 
 
 
-class Surface(alias surfaceEquation) {
+class Surface(alias surfaceEquation, bool poleSingularity) {
     enum codes = genCode!surfaceEquation();
 
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
@@ -171,11 +166,12 @@ class Surface(alias surfaceEquation) {
         const double R = globalR;
         const double v = y.data[2], u = y.data[0];
         const double cos_v = cos(v);
-        if (abs(cos_v) < 0.0000001) { // handle poles, poorly
-            res.data[1] = du;
-            res.data[3] = dv;
-            return res;
-        }
+        static if (poleSingularity)
+            if (abs(cos_v) < 0.000001) { // handle poles, poorly
+                res.data[1] = 0;
+                res.data[3] = 0;
+                return res;
+            }
         pragma(msg, codes[1]);
         mixin(codes[1]);
         return res;
@@ -189,9 +185,10 @@ class Surface(alias surfaceEquation) {
 
     static void courseVector(double u, double v, double angle, ref double du, ref double dv) {
         const double R = globalR;
-        double cos_v = cos(v), sin_v = sin(v);
-        double cos_u = cos(u), sin_u = sin(u);
-        if (abs(cos_v) < 0.0000001) cos_v = 1.0; // nonsensical but at least won't crash
+        double cos_v = cos(v);
+        const double cos_u = cos(u), sin_u = sin(u), sin_v = sin(v);
+        static if (poleSingularity)
+            if (abs(cos_v) < 0.000001) cos_v = cos_v >= 0 ? 0.000001 : 0.000001;
         enum u_code = format("du = sin(angle) / sqrt(%s);", codes[3]).txtSimp;
         enum v_code = format("dv = cos(angle) / sqrt(%s);", codes[5]).txtSimp;
         pragma(msg, u_code);
@@ -202,7 +199,7 @@ class Surface(alias surfaceEquation) {
     }
 
     static double courseAngle(double u, double v, double du, double dv) { // in radians
-        // up (0, 1/sqrt(g22=R^2)) = (0, 1/R)
+        // up (0, 1/sqrt(g22=R^2)) = (0, 1/R) for sphere
         // up*V = cos(a) * |V| = g12 * up_v * du + g22 * up_v * dv = R * dv
         // cos(a) = R*dv / |V|
         const double R = globalR;
@@ -241,13 +238,6 @@ Expr[] ellipsoidEq() {
 
 Expr[] torusEq() {
     auto R = new Var("R"), two = new Const("2");
-    /*
-    X = 2+cos(v)
-    z = -sin(v)
-    x = X*cos(u) = (2+cos(v))*cos(u)
-    y = X*sin(u) = (2+cos(v))*sin(u)
-    */
-
     return [mul(R, add(two, new Cos("v")), new Cos("u")),
             mul(R, add(two, new Cos("v")), new Sin("u")),
             mul(neg(R), new Sin("v")) ];
@@ -261,6 +251,7 @@ struct Sphere {
     static double distance = 3.0;
     alias color = synthColor;
     alias pointColor = ballPointColor;
+    static bool singularity = true;
 }
 
 struct Earth {
@@ -269,6 +260,7 @@ struct Earth {
     static double distance = 3.0;
     alias color = earthColor;
     alias pointColor = ballPointColor;
+    static bool singularity = true;
 }
 
 struct Plane {
@@ -284,6 +276,7 @@ struct FatBall {
     static double distance = 3.0;
     alias color = synthColor;
     alias pointColor = ballPointColor;
+    static bool singularity = true;
 }
 
 struct Donut {
@@ -445,7 +438,8 @@ class Renderer {
 }
 
 class Render(World) : Renderer {
-    alias Surf = Surface!(World.equation);
+    enum poleSingularity = __traits(hasMember, World, "singularity");
+    alias Surf = Surface!(World.equation, poleSingularity);
 
     override string name() { return World.name; }
     override void setDistance() { globalDistance = World.distance; }
@@ -552,6 +546,7 @@ class Render(World) : Renderer {
 
         auto pathApps = iota(taskPool.size + 1).amap!(i => appender!(UV[]));
         whoseCol.length = W;
+        const last_sx = W/2-1;
 
         foreach(sx; iota(-W/2, W/2).parallel) {
             auto idx = taskPool.workerIndex;
@@ -570,7 +565,7 @@ class Render(World) : Renderer {
 
             int sy = FloorH, iters = 0;
             double nextDist = scrDistAlongRay;
-            while(sy > minsy && iters < 10000) {
+            while(sy > minsy && iters < 5000) {
                 const double u = state.data[0], v = state.data[2];
 
                 if (walls) {
@@ -600,7 +595,7 @@ class Render(World) : Renderer {
                     wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
-                    if ((sx & 63)==0) pathApps[idx] ~= UV(u,v);
+                    if ((sx & 63)==0 || sx==last_sx) pathApps[idx] ~= UV(u,v);
                     if (dyndt) dt = sqrt(nextDist - s);
                 }
                 double ds = Surf.vlen(u, v, state.data[1] * dt, state.data[3] * dt);
@@ -609,7 +604,10 @@ class Render(World) : Renderer {
                 iters++;
             }
             while(sy > minsy) { // not full vertical line is drawn yet
-                wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, 0);
+                static if (poleSingularity)
+                    wrkImages[idx].repeatPixel(sx + W/2, sy + SkyH-1);
+                else
+                    wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, 0);
                 sy--;
             }
         }// for sx
