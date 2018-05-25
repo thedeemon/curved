@@ -261,7 +261,10 @@ extern (C) int UIAppMain(string[] args) {
 
     worldCombo.itemClick = delegate(Widget wgt, int idx) {
         bool just3d = false;
-        version(DirectorsCut) just3d = cbOnly3d.checked;
+        version(DirectorsCut) {
+            just3d = cbOnly3d.checked;
+            sceneFn = shotN;
+        }
         rend = worlds[idx];
         rend.setDistance();
         rend.ensureCorrectPos(ps);
