@@ -398,7 +398,7 @@ class Params {
     double heading, dt, range;
     UV pos;
     bool dyndt, walls;
-    int rotAlpha, rotBeta; // rotation angles in degrees
+    double rotAlpha, rotBeta; // rotation angles in degrees
 }
 
 double[3][3] rotMatrix(Params ps) {

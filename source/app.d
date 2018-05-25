@@ -1,5 +1,6 @@
 import std.stdio, dlangui, dlangui.widgets.metadata, std.math, std.conv, std.array, std.format, std.meta;
 import symbolic, img, geometry;
+import std.algorithm : canFind;
 
 mixin APP_ENTRY_POINT;
 enum VX = 854 - 320;
@@ -72,10 +73,17 @@ class DrawingBoard : ImageWidget {
 
     version(DirectorsCut) {
         void save(string fname) { saveBuf(fname, cdbuf); }
+        void delegate() timerF;
+        override bool onTimer(ulong id) {
+            if (timerF !is null)
+                timerF();
+            return true;
+        }
     }
 }
 
 mixin(registerWidgets!("__gshared static this", DrawingBoard));
+double mod360(double x) { while (x>=360) x -= 360; return x; }
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
@@ -111,7 +119,6 @@ extern (C) int UIAppMain(string[] args) {
                 TextWidget {text:""; id:"out"}
             }
             DrawingBoard {id: "pic"}
-            TextWidget { text: "WASD - move and turn, IJKL - rotate 3D view, U/O - zoom it." }
         }
     });
 
@@ -123,19 +130,22 @@ extern (C) int UIAppMain(string[] args) {
     auto edR = window.mainWidget.childById!EditLine("R");
     auto worldCombo = window.mainWidget.childById!ComboBox("world");
     auto pic = window.mainWidget.childById!DrawingBoard("pic");
+    auto vl = cast(VerticalLayout) window.mainWidget;
 
     version(DirectorsCut) {
-        int shotN = 0, batchFrames = 0;
+        int shotN = 0, batchFramesMove = 0, batchFramesView = 0;
         auto ui = parseML(q{
             HorizontalLayout {
                 EditLine { text: "/home/dee/tmp/curved/one/"; id: "picdir"; layoutWidth: 400 }
-                Button { text: "Save"; id: "saveBtn"}
+                Button { text: "Save"; id: "saveBtn" }
                 CheckBox { text: "action!"; id: "record" }
+                TextWidget { text: "..."; id: "times" }
             }
         });
-        auto vl = cast(VerticalLayout) window.mainWidget;
+        pic.setTimer(10);
         auto edPath = ui.childById!EditLine("picdir");
         auto cbRecord = ui.childById!CheckBox("record");
+        auto txtTimes = ui.childById!TextWidget("times");
         vl.addChild(ui);
 
         void saveFrame() {
@@ -151,6 +161,8 @@ extern (C) int UIAppMain(string[] args) {
             saveFrame();
             return true;
         };
+    } else {
+        vl.addChild(new TextWidget().text("WASD - move and turn, IJKL - rotate 3D view, U/O - zoom it."));
     }
 
     Renderer[] worlds;
@@ -187,7 +199,8 @@ extern (C) int UIAppMain(string[] args) {
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
         version(DirectorsCut)
-            txtOut.text = format("t=%s batch=%s"d, sw.peek.total!"msecs", batchFrames);
+            txtOut.text = format("t=%s batchM=%s batchV=%s"d, sw.peek.total!"msecs",
+                                    batchFramesMove, batchFramesView);
         else
             txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
@@ -232,10 +245,10 @@ extern (C) int UIAppMain(string[] args) {
                 while(ps.heading >= 360) ps.heading -= 360;
                 edHeading.text = format("%.3g"d, ps.heading);
                 break;
-            case KeyCode.KEY_L: ps.rotAlpha = (ps.rotAlpha + 350) % 360; rerender3DView(); return true;
-            case KeyCode.KEY_J: ps.rotAlpha = (ps.rotAlpha + 10) % 360;  rerender3DView(); return true;
-            case KeyCode.KEY_I: ps.rotBeta = (ps.rotBeta + 350) % 360;   rerender3DView(); return true;
-            case KeyCode.KEY_K: ps.rotBeta = (ps.rotBeta + 10) % 360;    rerender3DView(); return true;
+            case KeyCode.KEY_L: ps.rotAlpha = mod360(ps.rotAlpha + 360-10*k); rerender3DView(); return true;
+            case KeyCode.KEY_J: ps.rotAlpha = mod360(ps.rotAlpha + 10*k);     rerender3DView(); return true;
+            case KeyCode.KEY_I: ps.rotBeta = mod360(ps.rotBeta + 360-10*k);   rerender3DView(); return true;
+            case KeyCode.KEY_K: ps.rotBeta = mod360(ps.rotBeta + 10*k);       rerender3DView(); return true;
             case KeyCode.KEY_U: globalDistance += 0.5*k; rerender3DView(); return true;
             case KeyCode.KEY_O: globalDistance -= 0.5*k; rerender3DView(); return true;
             default: return false;
@@ -246,26 +259,39 @@ extern (C) int UIAppMain(string[] args) {
     }
 
     version(DirectorsCut) {
-        uint last_key;
+        uint last_key_move, last_key_view;
 
         void film() {
-            if (batchFrames <= 0) return;
-            moveAndDraw(last_key, 0.03);
+            if (batchFramesMove + batchFramesView <= 0) return;
+            if (batchFramesMove > 0) {
+                moveAndDraw(last_key_move, 0.03);
+                batchFramesMove--;
+            }
+            if (batchFramesView > 0) {
+                moveAndDraw(last_key_view, 0.05);
+                batchFramesView--;
+            }
             saveFrame();
-            batchFrames--;
-            if (batchFrames > 0)
-                window.mainWidget.executeInUiThread({ film(); });
         }
+
+        pic.timerF = { if (cbRecord.checked) film(); };
     }
 
     window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
         //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
             version(DirectorsCut) {
+                static keysMove = [KeyCode.KEY_W, KeyCode.KEY_A, KeyCode.KEY_S, KeyCode.KEY_D];
+                static keysView = [KeyCode.KEY_U, KeyCode.KEY_I, KeyCode.KEY_O, KeyCode.KEY_J, KeyCode.KEY_K, KeyCode.KEY_L];
                 if (cbRecord.checked) {
-                    batchFrames += 30;
-                    last_key = e.keyCode;
-                    window.mainWidget.executeInUiThread({ film(); });
+                    if (keysMove.canFind(e.keyCode)) {
+                        batchFramesMove += 30;
+                        last_key_move = e.keyCode;
+                    }
+                    if (keysView.canFind(e.keyCode)) {
+                        batchFramesView += 20;
+                        last_key_view = e.keyCode;
+                    }
                     return true;
                 }
             }
