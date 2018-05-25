@@ -428,7 +428,7 @@ auto getOr(T, string mbr, V)(V def) {
 }
 
 class Renderer {
-    abstract void drawSurface(ImageZ img, Params ps);
+    abstract void drawSurface(ImageZ img, Params ps, bool big);
     abstract void drawPoints(ImageZ img, UV[] points, Params ps);
     abstract UV[] drawFloorRay(ImageZ img, Params ps, const double u0, const double v0);
     abstract UV walk(UV pos, ref double heading, double dt, double dist);
@@ -447,9 +447,12 @@ class Render(World) : Renderer {
         static if (__traits(hasMember, World, "ensureCorrectPos"))
             World.ensureCorrectPos(ps);
     }
-    override void drawSurface(ImageZ img, Params ps) {
-        enum NU = getOr!(World, "NU")(1500);
-        enum NV = getOr!(World, "NV")(700); // number of mesh points
+    override void drawSurface(ImageZ img, Params ps, bool big) {
+        int NU = getOr!(World, "NU")(1500);
+        int NV = getOr!(World, "NV")(700); // number of mesh points
+        if (big) {
+            NV *= 2; NU = NU*3/2;
+        }
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
         const double zCenter = R * globalDistance, zScreen = img.W / 1.2;
@@ -573,7 +576,7 @@ class Render(World) : Renderer {
                     if (clr == wallColor) {
                         int totalh = cast(int) (H * scrDistAlongRay / s);
                         int h = min(totalh, H);
-                        int y0 = SkyH - h*3/8; //max(SkyH - h/2, 0);
+                        int y0 = SkyH - h*3/8;
                         assert(y0 >= 0);
                         int tx = cast(int)((u*cos(v) + v)*500) & 127;
                         double ky = 128.0 / totalh;

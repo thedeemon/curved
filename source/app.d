@@ -30,12 +30,9 @@ class DrawingBoard : ImageWidget {
         super.onDraw(buf);
     }
 
-	void fillBytes(uint q) {
-		foreach(y; 0..cdbuf.height) {
-			uint* ptr = cdbuf.scanLine(y);
-			foreach(x; 0..cdbuf.width)
-				ptr[x] = q;// ((x + q) ^ y) & 255;
-		}
+	void fillBytes(uint c) {
+		foreach(y; 0..cdbuf.height)
+			cdbuf.scanLine(y)[0..cdbuf.width] = c;
 	}
 
     void drawImgAt(ImageZ img, int dx, int dy, int sx, int sy, int szx, int szy) {
@@ -76,6 +73,7 @@ class DrawingBoard : ImageWidget {
     version(DirectorsCut) {
         void save(string fname) { saveBuf(fname, cdbuf); }
         void delegate() timerF;
+        dstring lastText;
         override bool onTimer(ulong id) {
             if (timerF !is null)
                 timerF();
@@ -83,13 +81,15 @@ class DrawingBoard : ImageWidget {
         }
 
         void say(dstring txt) {
-            txt = txt.replace("\\n"d, "\n"d);
+            txt = txt.replace("\\n"d, "\n"d).replace("|"d, "\n"d);
             foreach(y; 320..H) {
                 auto ptr = cdbuf.scanLine(y);
                 ptr[0..320] = 0;
             }
             font.drawMultilineText(cdbuf, 10, 330, txt, 0xFFFFFF);
+            lastText = txt;
         }
+        void say() { say(lastText); }
     }
 }
 
@@ -98,7 +98,7 @@ double mod360(double x) { while (x>=360) x -= 360; return x; }
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
-    int w= 880, h = 600;
+    int w= 880, h = 620;
 
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
@@ -155,6 +155,7 @@ extern (C) int UIAppMain(string[] args) {
                 HorizontalLayout {
                     EditLine { text: ""; id: "title"; layoutWidth: 600 }
                     Button { text: "Say"; id: "btnSay" }
+                    CheckBox { text: "only 3D"; id: "only3d"}
                 }
             }
         });
@@ -163,6 +164,7 @@ extern (C) int UIAppMain(string[] args) {
         auto cbRecord = ui.childById!CheckBox("record");
         auto txtTimes = ui.childById!TextWidget("times");
         auto edTitle = ui.childById!EditLine("title");
+        auto cbOnly3d = ui.childById!CheckBox("only3d");
         vl.addChild(ui);
 
         void saveFrame() {
@@ -203,7 +205,7 @@ extern (C) int UIAppMain(string[] args) {
     ps.rotAlpha = 0; ps.rotBeta = 0;
     Renderer rend = worlds[0];
     rend.setDistance();
-    rend.drawSurface(imgSphere, ps);
+    rend.drawSurface(imgSphere, ps, false);
     UV[] points;
 
     void render() {
@@ -212,15 +214,24 @@ extern (C) int UIAppMain(string[] args) {
         ps.heading = edHeading.text.to!double;
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
+        bool just3d = false;
+        version(DirectorsCut) just3d = cbOnly3d.checked;
         auto rng = edRange.text.to!double;
         if (rng >= 1 && rng <= 20) ps.range = rng;
         auto r = edR.text.to!double;
         if (r >= 100 && r <= 1000000) globalR = r;
         img.copyFrom(imgSphere);
-        points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
+        if (!just3d)
+            points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
         rend.drawPoints(img, points, ps);
-        pic.drawImgAt(img, 0,0, 100,100, 320,320);
-        pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
+        if (just3d) {
+            pic.fillBytes(0);
+            pic.drawImgAt(img, 350,0, 16,16, 480,480);
+            pic.say();
+        } else {
+            pic.drawImgAt(img, 0,0, 100,100, 320,320);
+            pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
+        }
         version(DirectorsCut) {
             txtOut.text = format("t=%s batchM=%s batchV=%s"d, sw.peek.total!"msecs",
                                     batchFramesMove, batchFramesView);
@@ -229,10 +240,17 @@ extern (C) int UIAppMain(string[] args) {
     }
 
     void rerender3DView() {
-        rend.drawSurface(imgSphere, ps);
+        bool just3d = false;
+        version(DirectorsCut) just3d = cbOnly3d.checked;
+        rend.drawSurface(imgSphere, ps, just3d);
         img.copyFrom(imgSphere);
         rend.drawPoints(img, points, ps);
-        pic.drawImgAt(img, 0,0, 100,100, 320,320);
+        if (just3d) {
+            pic.fillBytes(0);
+            pic.drawImgAt(img, 350,0, 16,16, 480,480);
+            pic.say();
+        } else
+            pic.drawImgAt(img, 0,0, 100,100, 320,320);
         window.invalidate();
     }
 
@@ -242,10 +260,12 @@ extern (C) int UIAppMain(string[] args) {
     };
 
     worldCombo.itemClick = delegate(Widget wgt, int idx) {
+        bool just3d = false;
+        version(DirectorsCut) just3d = cbOnly3d.checked;
         rend = worlds[idx];
         rend.setDistance();
         rend.ensureCorrectPos(ps);
-        rend.drawSurface(imgSphere, ps);
+        rend.drawSurface(imgSphere, ps, just3d);
         render();
         return true;
     };
@@ -272,8 +292,8 @@ extern (C) int UIAppMain(string[] args) {
             case KeyCode.KEY_J: ps.rotAlpha = mod360(ps.rotAlpha + 10*k);     rerender3DView(); return true;
             case KeyCode.KEY_I: ps.rotBeta = mod360(ps.rotBeta + 360-10*k);   rerender3DView(); return true;
             case KeyCode.KEY_K: ps.rotBeta = mod360(ps.rotBeta + 10*k);       rerender3DView(); return true;
-            case KeyCode.KEY_U: globalDistance += 0.5*k; rerender3DView(); return true;
-            case KeyCode.KEY_O: globalDistance -= 0.5*k; rerender3DView(); return true;
+            case KeyCode.KEY_U: globalDistance += 0.25*k; rerender3DView(); return true;
+            case KeyCode.KEY_O: globalDistance -= 0.25*k; rerender3DView(); return true;
             default: return false;
         }
         render();
@@ -302,7 +322,6 @@ extern (C) int UIAppMain(string[] args) {
     }
 
     window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
-        //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
             version(DirectorsCut) {
                 if (edTitle.focused || edPath.focused) return false;
