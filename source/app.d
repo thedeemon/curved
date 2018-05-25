@@ -8,6 +8,7 @@ enum VX = 854 - 320;
 class DrawingBoard : ImageWidget {
 	ColorDrawBuf cdbuf;
     int W = 854, H = 480;
+    Font font;
 
 	this() {
 		cdbuf = new ColorDrawBuf(W, H);
@@ -16,6 +17,7 @@ class DrawingBoard : ImageWidget {
 		this.margins = 0;// Rect(0, 10, 0, 10);//10
         fillBytes(0);
         initWall();
+        font = FontManager.instance.getFont(20, FontWeight.Normal, false, FontFamily.SansSerif, "Arial");
 	}
 
 	override void measure(int parentWidth, int parentHeight) {
@@ -79,6 +81,15 @@ class DrawingBoard : ImageWidget {
                 timerF();
             return true;
         }
+
+        void say(dstring txt) {
+            txt = txt.replace("\\n"d, "\n"d);
+            foreach(y; 320..H) {
+                auto ptr = cdbuf.scanLine(y);
+                ptr[0..320] = 0;
+            }
+            font.drawMultilineText(cdbuf, 10, 330, txt, 0xFFFFFF);
+        }
     }
 }
 
@@ -93,6 +104,7 @@ extern (C) int UIAppMain(string[] args) {
 
     // foreach(s; genCode!(Wormhole.equation)) writeln(s);
     // return 0;
+    version(DirectorsCut) h = 700;
 
     version(Windows) {
         w = w.pixelsToPoints; h = h.pixelsToPoints;
@@ -108,8 +120,6 @@ extern (C) int UIAppMain(string[] args) {
                 ComboBox {id: "world"}
                 TextWidget {text: "Heading:" }
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
-                // TextWidget {text: "dt:" }
-                // EditLine { text: "1"; id: "dt"; layoutWidth: 50}
                 CheckBox { text: "Dyn. step"; id: "dyndt"}
                 CheckBox { text: "Walls"; id: "walls"}
                 TextWidget {text: "Range:" }
@@ -133,19 +143,26 @@ extern (C) int UIAppMain(string[] args) {
     auto vl = cast(VerticalLayout) window.mainWidget;
 
     version(DirectorsCut) {
-        int shotN = 0, batchFramesMove = 0, batchFramesView = 0;
+        int shotN = 0, batchFramesMove = 0, batchFramesView = 0, sceneFn=0, titleFn=0;
         auto ui = parseML(q{
-            HorizontalLayout {
-                EditLine { text: "/home/dee/tmp/curved/one/"; id: "picdir"; layoutWidth: 400 }
-                Button { text: "Save"; id: "saveBtn" }
-                CheckBox { text: "action!"; id: "record" }
-                TextWidget { text: "..."; id: "times" }
+            VerticalLayout {
+                HorizontalLayout {
+                    EditLine { text: "/home/dee/tmp/curved/one/"; id: "picdir"; layoutWidth: 400 }
+                    Button { text: "Save"; id: "btnSave" }
+                    CheckBox { text: "action!"; id: "record" }
+                    TextWidget { text: "..."; id: "times" }
+                }
+                HorizontalLayout {
+                    EditLine { text: ""; id: "title"; layoutWidth: 600 }
+                    Button { text: "Say"; id: "btnSay" }
+                }
             }
         });
         pic.setTimer(10);
         auto edPath = ui.childById!EditLine("picdir");
         auto cbRecord = ui.childById!CheckBox("record");
         auto txtTimes = ui.childById!TextWidget("times");
+        auto edTitle = ui.childById!EditLine("title");
         vl.addChild(ui);
 
         void saveFrame() {
@@ -157,8 +174,14 @@ extern (C) int UIAppMain(string[] args) {
             pic.save( buildPath(path.to!string, format("%05d.png", shotN++)) );
         }
 
-        ui.childById!Button("saveBtn").click = delegate(Widget w) {
+        ui.childById!Button("btnSave").click = delegate(Widget w) {
             saveFrame();
+            return true;
+        };
+
+        ui.childById!Button("btnSay").click = delegate(Widget w) {
+            pic.say( edTitle.text );
+            titleFn = shotN;
             return true;
         };
     } else {
@@ -198,10 +221,10 @@ extern (C) int UIAppMain(string[] args) {
         rend.drawPoints(img, points, ps);
         pic.drawImgAt(img, 0,0, 100,100, 320,320);
         pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
-        version(DirectorsCut)
+        version(DirectorsCut) {
             txtOut.text = format("t=%s batchM=%s batchV=%s"d, sw.peek.total!"msecs",
                                     batchFramesMove, batchFramesView);
-        else
+        } else
             txtOut.text = format("t=%s"d, sw.peek.total!"msecs");
     }
 
@@ -272,6 +295,7 @@ extern (C) int UIAppMain(string[] args) {
                 batchFramesView--;
             }
             saveFrame();
+            txtTimes.text = format("scene %.2gs title %.2gs"d, (shotN-sceneFn) / 30.0, (shotN-titleFn) / 30.0);
         }
 
         pic.timerF = { if (cbRecord.checked) film(); };
@@ -281,15 +305,16 @@ extern (C) int UIAppMain(string[] args) {
         //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
             version(DirectorsCut) {
+                if (edTitle.focused || edPath.focused) return false;
                 static keysMove = [KeyCode.KEY_W, KeyCode.KEY_A, KeyCode.KEY_S, KeyCode.KEY_D];
                 static keysView = [KeyCode.KEY_U, KeyCode.KEY_I, KeyCode.KEY_O, KeyCode.KEY_J, KeyCode.KEY_K, KeyCode.KEY_L];
                 if (cbRecord.checked) {
                     if (keysMove.canFind(e.keyCode)) {
-                        batchFramesMove += 30;
+                        batchFramesMove = 30;
                         last_key_move = e.keyCode;
                     }
                     if (keysView.canFind(e.keyCode)) {
-                        batchFramesView += 20;
+                        batchFramesView = 20;
                         last_key_view = e.keyCode;
                     }
                     return true;
