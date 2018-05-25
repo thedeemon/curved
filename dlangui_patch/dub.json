@@ -1,0 +1,201 @@
+{
+	"authors": [
+		"Vadim Lopatin"
+	],
+	"configurations": [
+		{
+			"copyFiles-windows-x86": [
+				"libs/windows/x86/libfreetype-6.dll"
+			],
+			"versions-posix": [
+				"USE_SDL",
+				"USE_FREETYPE"
+			],
+			"name": "default",
+			"targetType": "staticLibrary",
+			"copyFiles-windows-x86_64": [
+				"libs/windows/x86_64/libfreetype-6.dll"
+			],
+			"versions-windows": [
+				"Unicode"
+			],
+			"dependencies": {
+				"derelict-sdl2": "~>2.0.0",
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"versions": [
+				"USE_OPENGL",
+				"EmbedStandardResources"
+			]
+		},
+		{
+			"excludedSourceFiles": [
+				"3rdparty/*GL*",
+				"3rdparty/android",
+				"3rdparty/dimage",
+				"3rdparty/fontconfig/*",
+				"3rdparty/icontheme",
+				"3rdparty/jni.d"
+			],
+			"name": "console",
+			"targetType": "staticLibrary",
+			"versions": [
+				"USE_CONSOLE",
+				"EmbedStandardResources"
+			]
+		},
+		{
+			"name": "external",
+			"dependencies": {
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"targetType": "staticLibrary",
+			"versions": [
+				"USE_EXTERNAL"
+			]
+		},
+		{
+			"name": "minimal",
+			"versions-windows": [
+				"Unicode",
+				"NO_OPENGL"
+			],
+			"dependencies": {
+				"derelict-sdl2": "~>2.0.0",
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"targetType": "staticLibrary",
+			"versions-posix": [
+				"USE_SDL",
+				"USE_FREETYPE",
+				"NO_OPENGL"
+			],
+			"versions": [
+				"EmbedStandardResources",
+	        		"ENABLE_SAVE_PNG"
+			]
+		},
+		{
+			"copyFiles-windows-x86": [
+				"libs/windows/x86/libfreetype-6.dll",
+				"libs/windows/x86/SDL2.dll"
+			],
+			"name": "sdl",
+			"targetType": "staticLibrary",
+			"copyFiles-windows-x86_64": [
+				"libs/windows/x86_64/libfreetype-6.dll",
+				"libs/windows/x86_64/SDL2.dll"
+			],
+			"versions-windows": [
+				"Unicode"
+			],
+			"dependencies": {
+				"derelict-sdl2": "~>2.0.0",
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"versions": [
+				"USE_SDL",
+				"USE_OPENGL",
+				"USE_FREETYPE",
+				"EmbedStandardResources"
+			]
+		},
+		{
+			"name": "x11",
+			"versions-windows": [
+				"Unicode"
+			],
+			"dependencies": {
+				"x11": "~>1.0.17",
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"targetType": "staticLibrary",
+			"versions": [
+				"USE_X11",
+				"USE_FREETYPE",
+				"EmbedStandardResources"
+			]
+		},
+		{
+			"copyFiles-windows-x86": [
+				"libs/windows/x86/libfreetype-6.dll"
+			],
+			"name": "sfml",
+			"targetType": "staticLibrary",
+			"copyFiles-windows-x86_64": [
+				"libs/windows/x86_64/libfreetype-6.dll"
+			],
+			"versions-windows": [
+				"Unicode"
+			],
+			"dependencies": {
+				"dsfml": "~>2.1.0",
+				"derelict-gl3": "~>1.0.18",
+				"derelict-ft": "~>1.1.2"
+			},
+			"versions": [
+				"USE_DSFML",
+				"USE_OPENGL",
+				"USE_FREETYPE",
+				"EmbedStandardResources"
+			]
+		}
+	],
+	"libs-linux": [
+		"z"
+	],
+	"-ddoxFilterArgs": [
+		"--unittest-examples",
+		"--min-protection=Protected",
+		"--ex",
+		"win32.",
+		"--ex",
+		"dimage.",
+		"--ex",
+		"fontconfig",
+		"--ex",
+		"src.dlangui"
+	],
+	"subPackages": [
+		"./examples/helloworld/",
+		"./examples/example1/",
+		"./examples/dmledit/",
+		"./examples/d3d/",
+		"./examples/dminer/",
+		"./examples/tetris/",
+		"./examples/opengl/",
+		"./examples/ircclient/",
+		"./examples/spreadsheet/",
+		"./examples/dragon/"
+	],
+	"sourceFiles-windows-x86-dmd": [
+		"$PACKAGE_DIR/src/win_app.def"
+	],
+	"excludedSourceFiles-windows": [
+		"3rdparty/fontconfig/*"
+	],
+	"name": "dlangui",
+	"importPaths": [
+		"3rdparty",
+		"src"
+	],
+	"targetType": "staticLibrary",
+	"license": "Boost",
+	"version": "0.9.178",
+	"stringImportPaths": [
+		"views"
+	],
+	"targetName": "dlangui",
+	"description": "Cross platform GUI for D. Layouts, styles, themes, unicode, i18n, OpenGL, widgets. Android support.",
+	"homepage": "https://github.com/buggins/dlangui",
+	"targetPath": "lib",
+	"sourcePaths": [
+		"3rdparty",
+		"src"
+	]
+}
