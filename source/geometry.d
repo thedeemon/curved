@@ -546,7 +546,7 @@ class Render(World) : Renderer {
 
         auto pathApps = iota(taskPool.size + 1).amap!(i => appender!(UV[]));
         whoseCol.length = W;
-        const last_sx = W/2-1;
+        const ray_sx = (-W/2) & 63;
 
         foreach(sx; iota(-W/2, W/2).parallel) {
             auto idx = taskPool.workerIndex;
@@ -573,7 +573,7 @@ class Render(World) : Renderer {
                     if (clr == wallColor) {
                         int totalh = cast(int) (H * scrDistAlongRay / s);
                         int h = min(totalh, H);
-                        int y0 = SkyH - h*3/8; //max(SkyH - h/2, 0);
+                        int y0 = SkyH - h*3/8;
                         assert(y0 >= 0);
                         int tx = cast(int)((u*cos(v) + v)*500) & 127;
                         double ky = 128.0 / totalh;
@@ -595,7 +595,7 @@ class Render(World) : Renderer {
                     wrkImages[idx].putPixel(sx + W/2, sy + SkyH-1, clr);
                     sy--;
                     nextDist = scrDistAlongRay * camY / sy;
-                    if ((sx & 63)==0 || sx==last_sx) pathApps[idx] ~= UV(u,v);
+                    if ((sx & 63)==ray_sx) pathApps[idx] ~= UV(u,v);
                     if (dyndt) dt = sqrt(nextDist - s);
                 }
                 double ds = Surf.vlen(u, v, state.data[1] * dt, state.data[3] * dt);

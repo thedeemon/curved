@@ -26,12 +26,9 @@ class DrawingBoard : ImageWidget {
         super.onDraw(buf);
     }
 
-	void fillBytes(uint q) {
-		foreach(y; 0..cdbuf.height) {
-			uint* ptr = cdbuf.scanLine(y);
-			foreach(x; 0..cdbuf.width)
-				ptr[x] = q;// ((x + q) ^ y) & 255;
-		}
+	void fillBytes(uint c) {
+		foreach(y; 0..cdbuf.height)
+			cdbuf.scanLine(y)[0..cdbuf.width] = c;
 	}
 
     void drawImgAt(ImageZ img, int dx, int dy, int sx, int sy, int szx, int szy) {
@@ -95,8 +92,6 @@ extern (C) int UIAppMain(string[] args) {
                 ComboBox {id: "world"}
                 TextWidget {text: "Heading:" }
                 EditLine { text: "90"; id: "heading"; layoutWidth: 50}
-                // TextWidget {text: "dt:" }
-                // EditLine { text: "1"; id: "dt"; layoutWidth: 50}
                 CheckBox { text: "Dyn. step"; id: "dyndt"}
                 CheckBox { text: "Walls"; id: "walls"}
                 TextWidget {text: "Range:" }
@@ -111,7 +106,6 @@ extern (C) int UIAppMain(string[] args) {
     });
 
     auto edHeading = window.mainWidget.childById!EditLine("heading");
-    // auto edDt = window.mainWidget.childById!EditLine("dt");
     auto txtOut = window.mainWidget.childById!TextWidget("out");
     auto cbDDT = window.mainWidget.childById!CheckBox("dyndt");
     auto cbWalls = window.mainWidget.childById!CheckBox("walls");
@@ -140,14 +134,17 @@ extern (C) int UIAppMain(string[] args) {
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
         auto sw = StopWatch(AutoStart.yes);
-        ps.heading = edHeading.text.to!double;
-        // ps.dt = edDt.text.to!double;
+        try { ps.heading = edHeading.text.to!double; } catch(ConvException e) {}
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
-        auto rng = edRange.text.to!double;
-        if (rng >= 1 && rng <= 20) ps.range = rng;
-        auto r = edR.text.to!double;
-        if (r >= 100 && r <= 1000000) globalR = r;
+        try {
+            auto rng = edRange.text.to!double;
+            if (rng >= 1 && rng <= 20) ps.range = rng;
+        } catch(ConvException e) {}
+        try {
+            auto r = edR.text.to!double;
+            if (r >= 100 && r <= 1000000) globalR = r;
+        } catch(ConvException e) {}
         img.copyFrom(imgSphere);
         points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
         rend.drawPoints(img, points, ps);
@@ -179,7 +176,6 @@ extern (C) int UIAppMain(string[] args) {
     };
 
     window.mainWidget.keyEvent = delegate(Widget wt, KeyEvent e) {
-        //writeln("main keyEvent ", e);
         if (e.action==KeyAction.KeyDown) {
             switch(e.keyCode) {
                 case KeyCode.KEY_A: ps.heading -= 10; edHeading.text = ps.heading.to!dstring; break;
