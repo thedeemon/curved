@@ -278,9 +278,10 @@ extern (C) int UIAppMain(string[] args) {
     };
 
     bool moveAndDraw(uint key, double k) {
+        double ang = k > 0.5 ? 10.0 : 20*k;
         switch(key) {
-            case KeyCode.KEY_A: ps.heading -= 10*k; edHeading.text = ps.heading.to!dstring; break;
-            case KeyCode.KEY_D: ps.heading += 10*k; edHeading.text = ps.heading.to!dstring; break;
+            case KeyCode.KEY_A: ps.heading -= ang; edHeading.text = ps.heading.to!dstring; break;
+            case KeyCode.KEY_D: ps.heading += ang; edHeading.text = ps.heading.to!dstring; break;
             case KeyCode.KEY_W:
                 auto hdn = ps.heading;
                 ps.pos = rend.walk(ps.pos, hdn, ps.dt, 50 * k);
@@ -314,7 +315,7 @@ extern (C) int UIAppMain(string[] args) {
         void film() {
             if (batchFramesMove + batchFramesView <= 0) return;
             if (batchFramesMove > 0) {
-                moveAndDraw(last_key_move, 0.03);
+                moveAndDraw(last_key_move, 0.05);
                 batchFramesMove--;
             }
             if (batchFramesView > 0) {
