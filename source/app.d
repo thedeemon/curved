@@ -211,15 +211,19 @@ extern (C) int UIAppMain(string[] args) {
     void render() {
         import std.datetime.stopwatch : StopWatch, AutoStart;
         auto sw = StopWatch(AutoStart.yes);
-        ps.heading = edHeading.text.to!double;
+        try { ps.heading = edHeading.text.to!double; } catch(ConvException e) {}
         ps.dyndt = cbDDT.checked;
         ps.walls = cbWalls.checked;
         bool just3d = false;
         version(DirectorsCut) just3d = cbOnly3d.checked;
-        auto rng = edRange.text.to!double;
-        if (rng >= 1 && rng <= 20) ps.range = rng;
-        auto r = edR.text.to!double;
-        if (r >= 100 && r <= 1000000) globalR = r;
+        try {
+            auto rng = edRange.text.to!double;
+            if (rng >= 1 && rng <= 20) ps.range = rng;
+        } catch(ConvException e) {}
+        try {
+            auto r = edR.text.to!double;
+            if (r >= 100 && r <= 1000000) globalR = r;
+        } catch(ConvException e) {}
         img.copyFrom(imgSphere);
         if (!just3d)
             points = rend.drawFloorRay(imgFloor, ps, ps.pos.u, ps.pos.v);
