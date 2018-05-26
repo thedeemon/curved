@@ -322,7 +322,7 @@ extern (C) int UIAppMain(string[] args) {
                 batchFramesView--;
             }
             saveFrame();
-            txtTimes.text = format("scene %.2gs title %.2gs"d, (shotN-sceneFn) / 30.0, (shotN-titleFn) / 30.0);
+            txtTimes.text = format("scene %ss title %ss"d, (shotN-sceneFn) / 30.0, (shotN-titleFn) / 30.0);
         }
 
         pic.timerF = { if (cbRecord.checked) film(); };
