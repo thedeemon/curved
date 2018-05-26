@@ -284,8 +284,8 @@ struct Donut {
     alias equation = torusEq;
     static double distance = 9.0;
     static const int NV = 700;
-    static double pickV(int iv) {
-        return (iv - NV/2) * PI / NV;
+    static double pickV(int iv, int nv) {
+        return (iv - nv/2) * PI*2 / nv;
     }
 
     static uint color(double u, double v) { // u: 0 .. 2Pi,   v: -Pi .. Pi
@@ -330,8 +330,8 @@ struct BlackHole {
 
     }
     static const int NV = 700;
-    static double pickV(int iv) {
-        return 1.0 + iv * 8.0 / NV;  // 1..9
+    static double pickV(int iv, int nv) {
+        return 1.0 + iv * 8.0 / nv;  // 1..9
     }
     static double distance = 12.0;
     static uint color(double u, double v) { // u: 0 .. 2Pi,   v: 1..9
@@ -376,8 +376,8 @@ struct Wormhole {
                 mul(v, R)];
     }
     static const int NV = 1200;
-    static double pickV(int iv) {
-        return (iv - NV/2) * 10.0 / NV;  // -5..5
+    static double pickV(int iv, int nv) {
+        return (iv - nv/2) * 10.0 / nv;  // -5..5
     }
     static double distance = 12.0;
     static uint color(double u, double v) { // u: 0 .. 2Pi,   v: -5..5
@@ -448,8 +448,8 @@ class Render(World) : Renderer {
             World.ensureCorrectPos(ps);
     }
     override void drawSurface(ImageZ img, Params ps) {
-        enum NU = getOr!(World, "NU")(1500);
-        enum NV = getOr!(World, "NV")(700); // number of mesh points
+        enum NU = getOr!(World, "NU")(2000);
+        enum NV = getOr!(World, "NV")(1000); // number of mesh points
         const W2 = img.W / 2, H2 = img.H / 2;
         const double R = globalR;
         const double zCenter = R * globalDistance, zScreen = img.W / 1.2;
@@ -458,7 +458,7 @@ class Render(World) : Renderer {
 
         foreach(iv; 1..NV-1) {
             static if (__traits(hasMember, World, "pickV"))
-            double v = World.pickV(iv);
+            double v = World.pickV(iv, NV);
             else
             double v = (iv - NV/2) * PI / NV;
 

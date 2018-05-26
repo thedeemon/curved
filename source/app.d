@@ -71,7 +71,7 @@ mixin(registerWidgets!("__gshared static this", DrawingBoard));
 
 extern (C) int UIAppMain(string[] args) {
     import dlangui.core.logger;
-    int w= 880, h = 600;
+    int w= 880, h = 620;
 
    	Log.setLogLevel( dlangui.core.logger.LogLevel.Error );
 
