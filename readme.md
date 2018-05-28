@@ -22,17 +22,17 @@ You can change R, radius of the sphere/torus/whatever (in pixels), higher values
 #### Torus
 Its outer part has positive curvature similar to a sphere or ellipsoid, but the inner part looks quite different, the curvature is negative there. Worth a look before going to wormholes.
 
-![torus](https://bitbucket.org/thedeemon/curved/downloads/curved-screenshot-torus.jpg)
+![torus](https://bitbucket.org/thedeemon/curved/downloads/torus.png)
 
 #### Black hole
 We take 2D section of Schwarzschild metric and find a 2D surface which, being embedded in ordinary 3D Euclidean space, has the same metric. This is pretty much what you usually see in popular clips showing spacetime curvature around black hole.
 
-![black hole](https://bitbucket.org/thedeemon/curved/downloads/curved-screenshot-blackhole.jpg)
+![black hole](https://bitbucket.org/thedeemon/curved/downloads/black-hole.png)
 
 #### Wormhole 
 A similar geometry, continued to the other size. Two infinite 2D planes connected at one place via such wormhole.
 
-![wormhole](https://bitbucket.org/thedeemon/curved/downloads/curved-screenshot-wormhole.jpg)
+![wormhole](https://bitbucket.org/thedeemon/curved/downloads/wormhole.png)
 
 ## How it's done
 To describe a geometry we just write the surface equation: how 2D coordinates (u,v) are mapped into 3D coordinates (x,y,z). For instance, in case of sphere it's
