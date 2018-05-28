@@ -1,7 +1,7 @@
 # Inside Curved Spaces
 Visualizing curved 3D spaces.
 
-We take a sphere or torus or some other curved surface and consider it a 2D space with curvature, then add one more dimension, orthogonal to those two, to get something like SÂ²xR, a curved 3D space. Then render it by casting rays following geodesics of this space.
+We take a sphere or torus or some other curved surface and consider it a 2D space with curvature, then add one more dimension, orthogonal to those two, to get something like S²xR, a curved 3D space. Then render it by casting rays following geodesics of this space.
 
 See:
 
@@ -30,7 +30,7 @@ We take 2D section of Schwarzschild metric and find a 2D surface which, being em
 ![black hole](https://bitbucket.org/thedeemon/curved/downloads/curved-screenshot-blackhole.jpg)
 
 #### Wormhole 
-A similar geometry, continuted to the other size. Two infinite 2D planes connected at one place via such wormhole.
+A similar geometry, continued to the other size. Two infinite 2D planes connected at one place via such wormhole.
 
 ![wormhole](https://bitbucket.org/thedeemon/curved/downloads/curved-screenshot-wormhole.jpg)
 
