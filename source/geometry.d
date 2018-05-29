@@ -43,6 +43,8 @@ string[] genCode(alias surfaceEquation)() {
 
     auto Xu = X.diff("u"); // basis vectors
     auto Xv = X.diff("v");
+    auto Xus = format("Xu: %s", Xu);
+    auto Xvs = format("Xv: %s", Xv);
     Expr[2][2] g, ginv; // metric tensor and its inverse
     g[0][0] = dot(Xu, Xu);
     g[0][1] = g[1][0] = dot(Xu, Xv);
@@ -79,7 +81,7 @@ string[] genCode(alias surfaceEquation)() {
     Expr du = new Var("du"), dv = new Var("dv");
     Expr mag = add(mul(g[0][0], du, du), mul(two, g[0][1], du, dv), mul(g[1][1], dv,dv));
     string vlen = format("return sqrt(%s);", mag.code).txtSimp.addTrigNeeded;
-    return [embed, accel,  vlen, g[0][0].code, g[0][1].code, g[1][1].code];
+    return [embed, accel,  vlen, g[0][0].code, g[0][1].code, g[1][1].code, Xus, Xvs];
     //      0      1        2         3           4            5
 }
 
@@ -151,6 +153,8 @@ uint synthColor(double u, double v) {
 
 class Surface(alias surfaceEquation, bool poleSingularity) {
     enum codes = genCode!surfaceEquation();
+    pragma(msg, codes[6]);
+    pragma(msg, codes[7]);
 
     static void embedIn3D(double u, double v, ref double x, ref double y, ref double z) {
         pragma(msg, codes[0]);

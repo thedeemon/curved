@@ -231,7 +231,7 @@ extern (C) int UIAppMain(string[] args) {
         if (just3d) {
             pic.fillBytes(0);
             pic.drawImgAt(img, 350,0, 16,16, 480,480);
-            pic.say();
+            version(DirectorsCut) pic.say();
         } else {
             pic.drawImgAt(img, 0,0, 100,100, 320,320);
             pic.drawImgAt(imgFloor, 320,0, 0,0, VX,480);
@@ -252,7 +252,7 @@ extern (C) int UIAppMain(string[] args) {
         if (just3d) {
             pic.fillBytes(0);
             pic.drawImgAt(img, 350,0, 16,16, 480,480);
-            pic.say();
+            version(DirectorsCut) pic.say();
         } else
             pic.drawImgAt(img, 0,0, 100,100, 320,320);
         window.invalidate();
